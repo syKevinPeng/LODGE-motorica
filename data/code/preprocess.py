@@ -9,9 +9,10 @@ import sys
 import glob
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from scipy.io import wavfile
 sys.path.append(os.getcwd()) 
-from dld.data.render_joints.smplfk import SMPLX_Skeleton, do_smplxfk, ax_to_6v, ax_from_6v
-
+from dld.data.render_joints.smplfk import SMPLX_Skeleton, do_smplxfk, ax_to_6v, ax_from_6v, SMPLSkeleton, do_smplfk
+from pytorch3d.transforms import (axis_angle_to_matrix, matrix_to_axis_angle)
 
 floor_height = 0
 
@@ -26,23 +27,25 @@ def vectorize_many(data):
     global_pose_vec_gt = torch.cat(out, dim=2)
     return global_pose_vec_gt
 
-def set_on_ground(root_pos, local_q_156, smplx_model):
-    # root_pos = root_pos[:, :] - root_pos[:1, :]
+def set_on_ground(root_pos, local_q_axis, human_model):
+    # if human_model is SMPL
+    l_toe_index = 10
+    r_toe_index = 11
     length = root_pos.shape[0]
     # model_q = model_q.view(b*s, -1)
     # model_x = model_x.view(-1, 3)
-    positions = smplx_model.forward(local_q_156, root_pos)
-    positions = positions.view(length, -1, 3)   # bxt, j, 3
-    
-    l_toe_h = positions[0, 10, 1] - floor_height
-    r_toe_h = positions[0, 11, 1] - floor_height
+    positions = human_model.forward(local_q_axis, root_pos)
+    positions = torch.reshape(positions, (length, -1, 3)) # bxt, j, 3
+
+    l_toe_h = positions[0, l_toe_index, 1] - floor_height
+    r_toe_h = positions[0, r_toe_index, 1] - floor_height
     if abs(l_toe_h - r_toe_h) < 0.02:
         height = (l_toe_h + r_toe_h)/2
     else:
         height = min(l_toe_h, r_toe_h)
     root_pos[:, 1] = root_pos[:, 1] - height
 
-    return root_pos, local_q_156
+    return root_pos
 
 def set_on_ground_139(data, smplx_model, ground_h=0):
     length = data.shape[0]
@@ -60,14 +63,13 @@ def set_on_ground_139(data, smplx_model, ground_h=0):
     return data
 
 def motion_feats_extract(moinputs_dir, mooutputs_dir, music_indir, music_outdir):
-
-    device = "cpu"
-    print("extracting")
     raw_fps = 30
     data_fps = 30
     data_fps <= raw_fps
-    device = "cpu"
-    smplx_model = SMPLX_Skeleton()
+    device = "gpu"
+    # smplx_model = SMPLX_Skeleton()
+    # we use smpl model instead of smplx for motorica data
+    smpl_model = SMPLSkeleton()
 
     os.makedirs(mooutputs_dir, exist_ok=True)
     os.makedirs(music_outdir, exist_ok=True)
@@ -75,91 +77,78 @@ def motion_feats_extract(moinputs_dir, mooutputs_dir, music_indir, music_outdir)
     motions = sorted(glob.glob(os.path.join(moinputs_dir, "*.npy")))
     for motion in tqdm(motions):
         print(motion)
-        data = np.load(motion)
-        fname = os.path.basename(motion).split(".")[0]
-        mname = fname if 'M' not in fname else fname[1:]
-        music_fea = np.load(os.path.join(music_indir, mname+".npy"))
-        if mname in ["010", "014"]:
-            data = data[3:]
-            music_fea = music_fea[3:]
-        # The following dances, and the first few seconds of the movement is very monotonous, in order to avoid the impact on the network, we do not train this small part of the movement
-        if mname == '004':
-            data = data[8*30:]
-            music_fea = music_fea[8*30:]
-        if mname == '005':
-            data = data[10*30:]
-            music_fea = music_fea[10*30:]
-        if mname == '067':
-            data = data[6*30:]
-            music_fea = music_fea[6*30:]
-        if mname == '105':
-            data = data[19*30:]
-            music_fea = music_fea[19*30:]
-        if mname == '110':
-            data = data[14*30:]
-            music_fea = music_fea[14*30:]
-        if mname == '113':
-            data = data[29*30:]
-            music_fea = music_fea[29*30:]
-        if mname == '153':
-            data = data[52*30:]
-            music_fea = music_fea[52*30:]
-        if mname == '211':
-            data = data[22*30:]
-            music_fea = music_fea[22*30:]
-        # 004:8
-        # 005:10
-        # 067:6
-        # 105:19
-        # 110:14
-        # 113:29
-        # 153:52
-        # 211:22
-        np.save(os.path.join(music_outdir, mname+".npy"), music_fea)
+        data = np.load(motion, allow_pickle=True).item()
+        motion_data = data["motion"]['motion_data']
+        data_fps = data['current_fps']
+        fname = os.path.basename(motion).split(".")[0].replace("_motion", "")
+        # fname = data['motion']['file_name']
+        wav_path = os.path.join(music_indir, fname + ".wav")
+        sr, music_fea = wavfile.read(wav_path)
 
-        if data.shape[1] == 315:
-            pos = data[:, :3]   # length, c
-            q = data[:, 3:]
-        elif data.shape[1] == 319:
-            pos = data[:, 4:7]   # length, c
-            q = data[:, 7:]
-        print("data.shape", data.shape)
-        print("pos.shape", pos.shape)
-        print("q.shape", q.shape)
-        root_pos = torch.Tensor(pos).to(device) # 150, 3
-        local_q = torch.Tensor(q).to(device).view(q.shape[0], 52, 6)    # 150, 165
-        local_q = ax_from_6v(local_q)
+        # convert to mono if stereo/multi-channel
+        if music_fea.ndim > 1:
+            music_fea = music_fea.mean(axis=1)
+
+        # convert integers to float32 in [-1,1], preserve floats as float32
+        if np.issubdtype(music_fea.dtype, np.integer):
+            music_fea = music_fea.astype(np.float32) / np.iinfo(music_fea.dtype).max
+        else:
+            music_fea = music_fea.astype(np.float32)
+
+        np.save(os.path.join(music_outdir, fname+".npy"), music_fea)
+        print(f'motion data shape: {motion_data.shape}')
+
+        # convert numpy arrays to torch tensors before calling pytorch3d / SMPL routines
+        root_pos  = motion_data[:, 0, :3]   # (150, 3)
+        local_q_mat_flattented = motion_data[:, 1:, :] #(150, 24, 9)
+        # reshape into (T, 24, 3, 3)
+        local_q_mat = local_q_mat_flattented.reshape(local_q_mat_flattented.shape[0], local_q_mat_flattented.shape[1], 3, 3)
+
+        # pytorch3d expects torch tensors (not numpy). Convert and use matrix_to_axis_angle which returns a torch tensor.
+        local_q_mat_t = torch.from_numpy(local_q_mat).float()
+        local_q_axis_t = matrix_to_axis_angle(local_q_mat_t)  # (T, 24, 3) tensor
+        # flattened axis-angle for FK: (T, 72)
+        local_q_axis_flattened = local_q_axis_t.reshape(local_q_axis_t.shape[0], -1)
+
+        # convert root_pos to torch tensor as well
+        root_pos = torch.from_numpy(root_pos).float()
         length = root_pos.shape[0]
-        local_q = local_q.view(length, -1, 3)  
-        print("local_q", local_q.shape)
-        local_q_156 = local_q.view(length, 156)
-        root_pos, local_q_156 = set_on_ground(root_pos, local_q_156, smplx_model)
-        positions = smplx_model.forward(local_q_156, root_pos)
+        # set on ground and run FK using torch tensors
+        root_pos = set_on_ground(root_pos.unsqueeze(0), local_q_axis_t.unsqueeze(0), smpl_model)
+        positions = smpl_model.forward(local_q_axis_t.unsqueeze(0), root_pos)
         positions = positions.view(length, -1, 3)   # bxt, j, 3
 
         # contacts
 
         feet = positions[:, (7, 8, 10, 11)]  # # 150, 4, 3
-        contacts_d_ankle = (feet[:,:2,1] < 0.12).to(local_q_156)
-        contacts_d_teo = (feet[:,2:,1] < 0.05).to(local_q_156)
+        contacts_d_ankle = (feet[:,:2,1] < 0.12).to(local_q_axis_flattened)
+        contacts_d_teo = (feet[:,2:,1] < 0.05).to(local_q_axis_flattened)
         contacts_d = torch.cat([contacts_d_ankle, contacts_d_teo], dim=-1).detach().cpu().numpy()
 
-
-        local_q_156 = local_q_156.view(length, 52, 3)  
-        local_q_312 = ax_to_6v(local_q_156).view(length,312).detach().cpu().numpy()
+        local_q_axis = local_q_axis_flattened.view(length, 24, 3)  
+        local_q_6v_flattented = ax_to_6v(local_q_axis).view(length, 24*6).detach().cpu().numpy()
         print("contacts_d.shape", contacts_d.shape)
         print("root_pos.shape", root_pos.shape)
-        print("local_q_312.shape", local_q_312.shape)
-        mofeats_input = np.concatenate( [contacts_d, root_pos, local_q_312] ,axis=-1)
+        print("local_q_6v_flattented.shape", local_q_6v_flattented.shape)
+        # root_pos is a torch tensor here; convert to numpy for concatenation
+        root_pos_np = root_pos.detach().cpu().numpy().squeeze(0)
+        mofeats_input = np.concatenate([contacts_d, root_pos_np, local_q_6v_flattented], axis=-1)
         np.save(os.path.join(mooutputs_dir, fname+".npy"), mofeats_input)
         print("mofeats_input", mofeats_input.shape)
     return
 
 
 if __name__ == "__main__":
-    motion_feats_extract(#moinputs_dir='/data2/lrh/dataset/fine_dance/origin/motion_feature315', 
-                        moinputs_dir='data/finedance/motion/', 
-                        mooutputs_dir="data/finedance/mofea319/", 
-                        music_indir="data/finedance/music_npy", 
-                        # music_indir="/data2/lrh/dataset/fine_dance/origin/music_feature35_edge",
-                        music_outdir="data/finedance/music_npynew/", )
+    # motion_feats_extract(#moinputs_dir='/data2/lrh/dataset/fine_dance/origin/motion_feature315', 
+    #                     moinputs_dir='data/finedance/motion/', 
+    #                     mooutputs_dir="data/finedance/mofea319/", 
+    #                     music_indir="data/finedance/music_npy", 
+    #                     # music_indir="/data2/lrh/dataset/fine_dance/origin/music_feature35_edge",
+    #                     music_outdir="data/finedance/music_npynew/", )
+    motion_feats_extract(
+        moinputs_dir='/fs/nexus-projects/PhysicsFall/editable_dance_project/data/motorica/sliced_motion_smpl',
+        mooutputs_dir='/fs/nexus-projects/PhysicsFall/LODGE/data/motorica/mofea319',
+        music_indir='/fs/nexus-projects/PhysicsFall/editable_dance_project/data/motorica/sliced_audio',
+        music_outdir='/fs/nexus-projects/PhysicsFall/LODGE/data/motorica/music_npynew',
+
+    )

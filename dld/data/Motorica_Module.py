@@ -9,10 +9,10 @@ from .FineDance_dataset import FineDance_Smpl
 from .Motorica_dataset import Motorica_Smpl
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
-from .render_joints.smplfk import SMPLX_Skeleton, ax_from_6v
+from .render_joints.smplfk import SMPLX_Skeleton, ax_from_6v, SMPLSkeleton
 
 
-class FineDanceDataModule(pl.LightningDataModule):
+class MotoricaDataModule(pl.LightningDataModule):
     def __init__(self,
                  cfg,
                  batch_size,
@@ -26,25 +26,17 @@ class FineDanceDataModule(pl.LightningDataModule):
         self.name = name
         self.kwargs = kwargs
         self.is_mm = False
-        self.smplx_fk = SMPLX_Skeleton(Jpath='/data2/lrh/project/dance/Lodge/lodge_pub/data/smplx_neu_J_1.npy', device=cfg.DEVICE)           # debug 这里的DEVICE？
-        
+        self.smpl_fk = SMPLSkeleton(device=cfg.DEVICE)        
         # self.save_hyperparameters(logger=False)
         # self.njoints = 52       # 55
     def setup(self, stage=None):
         # Assign train/val datasets for use in dataloaders
         if stage == 'fit' or stage is None:
-            if self.name and self.name.lower() == 'motorica' and Motorica_Smpl is not None:
-                self.trainset = Motorica_Smpl(args=self.cfg, istrain=True, dataname=self.name)
-                self.valset = Motorica_Smpl(args=self.cfg, istrain=False, dataname=self.name)
-            else:
-                self.trainset = FineDance_Smpl(args=self.cfg, istrain=True, dataname=self.name)
-                self.valset = FineDance_Smpl(args=self.cfg, istrain=False, dataname=self.name)
+            self.trainset = Motorica_Smpl(args=self.cfg, istrain=True, dataname=self.name)
+            self.valset = Motorica_Smpl(args=self.cfg, istrain=False, dataname=self.name)
         # Assign test dataset for use in dataloader(s)
         if stage == 'test' or stage is None:
-            if self.name and self.name.lower() == 'motorica' and Motorica_Smpl is not None:
-                self.testset = Motorica_Smpl(args=self.cfg, istrain=False, dataname=self.name)
-            else:
-                self.testset = FineDance_Smpl(args=self.cfg, istrain=False)
+            self.testset = Motorica_Smpl(args=self.cfg, istrain=False, dataname=self.name)
         
             
     def train_dataloader(self):
@@ -65,7 +57,7 @@ class FineDanceDataModule(pl.LightningDataModule):
             trans, rot6d = torch.split(features, (3, features.shape[2] - 3), dim=2)      # 前4维是foot contact
             b, s, c = rot6d.shape
             local_q_156 = ax_from_6v(rot6d.reshape(b, s, -1, 6)) 
-            joints = self.smplx_fk.forward(local_q_156, trans)
+            joints = self.smpl_fk.forward(local_q_156, trans)
             joints = joints.view(b, s, 55, 3)
             return joints
         else: 

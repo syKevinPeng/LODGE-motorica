@@ -32,64 +32,42 @@ def flip_pose(pose):
     pose[:,2::3] = -pose[:,2::3]
     return pose
 
-Genres_aist = {
-    'gBR': 0,
-    'gPO': 1,
-    'gLO': 2,
-    'gMH': 3,
-    'gLH': 4,
-    'gHO': 5,
-    'gWA': 6,
-    'gKR': 7,
-    'gJS': 8,
-    'gJB': 9,
+
+Genres_Motorica = {
+    # Hiphop	gLH	2	84
+    # Krumping	gKR	1	18
+    # Popping	gPO	2	42
+    # Locking	gLO	2	18
+    # Jazz	gJZ	2	52
+    # Charleston	gCH	2	50
+    # Tapping	gTP	2	11
+    # Casual	gCA
+    'gLH': 0,
+    'gKR': 1,
+    'gPO': 2,
+    'gLO': 3,
+    'gJZ': 4,
+    'gCH': 5,
+    'gTP': 6,
+    'gCA': 7,
 }
 
-Genres_fd = {            # Breaking
-          'Breaking': 0,
-          'Popping': 1,
-          'Locking': 2,
-          'Hiphop':3,
-          'Urban':4,
-          'Jazz':5,
-          'jazz':5,
 
-          'Tai':6,
-          'Uighur':7,
-          'Hmong':8,
-          'Dai':6,
-          'Wei':7,
-          'Miao':8,
 
-          'HanTang':9,
-          'ShenYun':10,
-          'Kun':11,
-          'DunHuang':12,
-
-          'Korean':13,
-          'Choreography':14,
-          'Chinese':15,
-}
-
-def music2genre(label_dir):
+def music2genre(file_dir):
     music_genre = {}
-    for file in os.listdir(label_dir):
+    for file in os.listdir(file_dir):
         name = file.split(".")[0]
-        jsonfile = os.path.join(label_dir, file)
-        with open(jsonfile,"r") as f:
-            genredict = json.load(f)
-        genre = genredict['style2']
-
-        music_genre[name] = genre
+        exit()
+        
 
     return music_genre
 
-class FineDance_Smpl(data.Dataset):
+class Motorica_Smpl(data.Dataset):
     def __init__(self, args, istrain, dataname=None):
         self.motion_dir = eval(f"args.DATASET.{dataname.upper()}.MOTION")     
         self.music_dir = eval(f"args.DATASET.{dataname.upper()}.MUSIC")  
-        if 'FINEDANCE' in dataname:
-            self.music2genre = music2genre(eval(f"args.DATASET.{dataname.upper()}.LABEL"))
+        self.music2genre = music2genre(eval(f"args.DATASET.{dataname.upper()}.MOTION"))
 
         self.istrain = istrain
         self.args = args

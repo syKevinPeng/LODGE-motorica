@@ -1,6 +1,6 @@
 NAME: FineDance_relative_Norm_GenreDis_bc190 # Experiment name
 ACCELERATOR: 'gpu' # Devices optioncal: “cpu”, “gpu”, “tpu”, “ipu”, “hpu”, “mps, “auto”
-DEVICE: [0,1,2,3]   #,  #  # Index of gpus eg. [0] or [0,1,2,3]
+DEVICE: [0]   #,  #  # Index of gpus eg. [0] or [0,1,2,3]
 
 # FOLDER: ./experiments
 SEED_VALUE: 1234
@@ -18,7 +18,7 @@ TRAIN:
   RESUME: '' # Experiment path to be resumed training
   # PRETRAINED_VAE: ''
   PRETRAINED: '' # Pretrained model path
-  DATASETS: ['FINEDANCE_139CUT'] # Training datasets
+  DATASETS: ['motorica'] #['motorica'] #['FINEDANCE_139CUT'] # Training datasets
 
   OPTIM:
     TYPE: 'Adan' # Optimizer type
@@ -133,7 +133,7 @@ LOGGER:
   TENSORBOARD: true
   WANDB:
     OFFLINE: false
-    PROJECT: null
+    PROJECT: lodge
     RESUME_ID: null
 RENDER:
   JOINT_TYPE: mmm

@@ -19,7 +19,7 @@ from tqdm import tqdm
 from typing import NewType
 Tensor = NewType('Tensor', torch.Tensor)
 import torch.nn.functional as F
-import pickle5 as pickle
+import pickle
 
 
 from pytorch3d.transforms import (axis_angle_to_matrix, matrix_to_axis_angle,
@@ -112,6 +112,28 @@ def do_smplxfk(data, smplx_model):
     poses = torch.cat([poses,hand], dim = 1).view(length, 156)
     root_pos = data[:, 4:7]
     positions = smplx_model.forward(poses, root_pos)
+    if dimen == 3:
+        positions = positions.reshape(B,T,-1,3)
+    return positions
+
+def do_smplfk(data, smpl_model):
+    # data : N, 69 or B,T,69
+    dimen = 0
+    if not data.shape[-1] == 69:
+        raise("data.shape error")
+    if len(data.shape) == 3:
+        dimen = 3
+        B,T,_ = data.shape
+        data = data.reshape(-1, _)
+    
+    assert len(data.shape) == 2
+    length ,_ = data.shape
+    poses = data[:,7:69].reshape(length, 22, 6) # check this later.
+    # DEBUG
+    # poses = poses[:,:,:3]
+    poses = ax_from_6v(poses)
+    root_pos = data[:, 4:7]
+    positions = smpl_model.forward(poses, root_pos)
     if dimen == 3:
         positions = positions.reshape(B,T,-1,3)
     return positions
