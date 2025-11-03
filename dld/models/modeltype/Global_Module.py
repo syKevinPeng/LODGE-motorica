@@ -256,7 +256,7 @@ class Global_Module(BaseModel):
             
  
             
-    def training_epoch_end(self, outputs):
+    def on_training_epoch_end(self, outputs):
         return self.allsplit_epoch_end("train", outputs)
 
     def validation_epoch_end(self, outputs):

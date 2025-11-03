@@ -58,9 +58,12 @@ def music2genre(file_dir):
     music_genre = {}
     for file in os.listdir(file_dir):
         name = file.split(".")[0]
-        exit()
+        genre = name.split('_')[1]
+        if genre in Genres_Motorica:
+            music_genre[name] = genre
+        else:
+            print("genre error!", genre)
         
-
     return music_genre
 
 class Motorica_Smpl(data.Dataset):
@@ -72,7 +75,7 @@ class Motorica_Smpl(data.Dataset):
         self.istrain = istrain
         self.args = args
         self.seq_len = args.FINEDANCE.full_seq_len
-        slide = args.FINEDANCE.full_seq_len // args.FINEDANCE.windows
+        slide = 1 # since we are loading sliced data, slide is 1
 
         self.motion_index = []
         self.music_index = []
@@ -94,67 +97,56 @@ class Motorica_Smpl(data.Dataset):
             if name[:-4] in ignor_list:
                 continue
             motion = np.load(os.path.join(self.motion_dir, name))
-
-            if dataname == "AISTPP":
-                motion = motion[::2]
             music = np.load(os.path.join(self.music_dir, name))
 
             min_all_len = min(motion.shape[0], music.shape[0])
+            print(f'min_all_len for {name}: {min_all_len}')
             motion = motion[:min_all_len]
           
-  
-            if motion.shape[-1] == 319 and args.FINEDANCE.nfeats ==139:
+            # hand smpl motion shape
+            if motion.shape[-1] == 151 and args.FINEDANCE.nfeats ==139:
                 motion = motion[:,:139]
-            elif motion.shape[-1] == 139:
+            elif motion.shape[-1] == 151:
                 pass
             else:
                 print("motion.shape", motion.shape)
                 raise("input motion shape error!")
-            music = music[:min_all_len]        
-            nums = (min_all_len-self.seq_len) // slide + 1          # 舍弃了最后一段不满seq_len的motion
+            # sanity check if the music and motion are aligned
+            assert motion.shape[0] == music.shape[0], f"motion and music length not equal for {name}! {motion.shape[0]} vs {music.shape[0]}"             
+           
+            nums = 1
+            genre_name = name.split('_')[1]
+            genre_id = np.array(Genres_Motorica[genre_name])
+            genre = torch.from_numpy(genre_id).unsqueeze(0)
 
-            if 'FINEDANCE' in dataname:
-                genre = self.music2genre[name.split(".")[0]]
-                # print("genre1 ", genre)
-                genre = np.array(Genres_fd[genre])
-                genre = torch.from_numpy(genre).unsqueeze(0)
-            elif 'AISTPP' in dataname:
-                genre = name.split('_')[0]
-                genre = np.array(Genres_aist[genre])
-                genre = torch.from_numpy(genre).unsqueeze(0)
-            
-            if self.istrain:
-                clip_index = []
-                for i in range(nums):
-                    motion_clip = motion[i * slide: i * slide + self.seq_len]
-                    if motion_clip.std(axis=0).mean() > 0.07:           # judge wheather the motion clip is effective
-                        clip_index.append(i)
-                index = np.array(clip_index) * slide + total_length     # clip_index is local index 
-                genre_list = genre_list + len(clip_index)*[genre]
-            else:
-                index = np.arange(nums) * slide + total_length
-                genre_list = genre_list + nums*[genre]
+            # since we are loading sliced data, we don't slice again here
+            # if self.istrain:
+            #     clip_index = []
+            #     for i in range(nums):
+            #         motion_clip = motion[i * slide: i * slide + self.seq_len]
+            #         if motion_clip.std(axis=0).mean() > 0.07:           # judge wheather the motion clip is effective
+            #             clip_index.append(i)
+            #     index = np.array(clip_index) * slide + total_length     # clip_index is local index 
+            #     genre_list = genre_list + len(clip_index)*[genre]
+            # else:
+            #     index = np.arange(nums) * slide + total_length
+            #     genre_list = genre_list + nums*[genre]
 
             if args.FINEDANCE.mix:
-                motion_index = []
-                music_index = []
-                num = (len(index) - 1) // 8 + 1
-                for i in range(num):
-                    motion_index_tmp, music_index_tmp = np.meshgrid(index[i*8:(i+1)*8], index[i*8:(i+1)*8])         
-                    motion_index += motion_index_tmp.reshape((-1)).tolist()
-                    music_index += music_index_tmp.reshape((-1)).tolist()
-            else:
-                motion_index = index.tolist()
-                music_index = index.tolist()
+                raise NotImplementedError("mix not implemented for Motorica yet")
+            # else:
+            #     motion_index = index.tolist()
+            #     music_index = index.tolist()
 
             
-            self.motion_index += motion_index
-            self.music_index += music_index
-            total_length += min_all_len
+            # self.motion_index += motion_index
+            # self.music_index += music_index
+            # total_length += min_all_len
 
-            assert len(self.motion_index) == len(genre_list)
+            # assert len(self.motion_index) == len(genre_list)
             motion_all.append(motion)
             music_all.append(music)
+            genre_list.append(genre)
 
         self.motion = np.concatenate(motion_all, axis=0).astype(np.float32)
         self.music = np.concatenate(music_all, axis=0).astype(np.float32)
@@ -167,12 +159,9 @@ class Motorica_Smpl(data.Dataset):
         return self.len
 
     def __getitem__(self, index):
-        motion_index = self.motion_index[index]
-        music_index = self.music_index[index]
-        motion = self.motion[motion_index:motion_index+self.seq_len]
-        music = self.music[music_index:music_index+self.seq_len]
+        motion = self.motion[index]
+        music = self.music[index]
         genre = self.genre_list[index]
-
         return motion, music, genre
     
     def get_train_test_list(self, dataset="FineDance"):
@@ -220,7 +209,7 @@ class Motorica_Smpl(data.Dataset):
             return  ignore, train, test
 
 
-        else:
+        elif dataset == "FINEDANCE":
             all_list = []
             train_list = []
             for i in range(1,212):
@@ -257,6 +246,36 @@ class Motorica_Smpl(data.Dataset):
                     if one in morden_list:
                         test_list.remove(one)
                 return ignor_list, train_list, test_list
+        
+        elif dataset == "motorica":
+            train_list = []
+            test_list = []
+            ignor_list = []
+            test_keys = [ "kthjazz_gCH_sFM_cAll_d02_mCH_ch01_whitemanpaulandhisorchestraloisiana_006",
+                "kthjazz_gJZ_sFM_cAll_d02_mJZ_ch01_bennygoodmansugarfootstomp_003",
+                "kthjazz_gTP_sFM_sngl_d02_015",
+                "kthmisc_gCA_sFM_cAll_d01_mCA_ch24",
+                "kthstreet_gKR_sFM_cAll_d01_mKR_ch01_chargedcableupyour_001",
+                "kthstreet_gLH_sFM_cAll_d01_mLH_ch01_thisisit_001",
+                "kthstreet_gLH_sFM_cAll_d02_mLH_ch01_lala_001",
+                "kthstreet_gLO_sFM_cAll_d02_mLO_ch01_arethafranklinrocksteady_002",
+                "kthstreet_gPO_sFM_cAll_d01_mPO_ch01_bombom_002",
+                "kthstreet_gPO_sFM_cAll_d02_mPO_ch01_bombom_001"]
+            
+            for file in os.listdir(self.motion_dir):
+                file_stem = file.split(".")[0]
+                # if any of the test keys is in the file_stem, then it is test file
+                if any(test_key in file_stem for test_key in test_keys):
+                    test_list.append(file_stem)
+                else:
+                    train_list.append(file_stem)
+            
+            print(f'train num: {len(train_list)}, test num: {len(test_list)}')
+
+            return ignor_list, train_list, test_list
+        
+        else:
+            raise ValueError(f"dataset name error! {dataset}")
 
 
 

@@ -380,16 +380,16 @@ class Local_Module(BaseModel):
         l_adv_loss = ((l_dis_real + l_dis_fake) / 2)
         return l_adv_loss
             
-    def training_epoch_end(self, outputs):
+    def on_training_epoch_end(self, outputs):
         return self.allsplit_epoch_end("train", outputs)
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self, outputs):
         # print("in validation", self.trainer.current_epoch)
         if self.trainer.current_epoch % 50 == 0  or  (self.trainer.current_epoch+1) % 50 == 0:       
             self.save_npy(outputs[0][0], outputs[0][1], phase='val', epoch=self.trainer.current_epoch)
         return self.allsplit_epoch_end("val", outputs)
 
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self, outputs):
         print("in test_epoch_end", self.trainer.current_epoch)
         self.save_npy(outputs[0][0], outputs[0][1], phase='test', epoch=self.trainer.current_epoch)
         self.cfg.TEST.REP_I = self.cfg.TEST.REP_I + 1

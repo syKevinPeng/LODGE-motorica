@@ -148,14 +148,14 @@ class BaseModel(LightningModule):
         if not self.trainer.sanity_checking:
             self.log_dict(dico, sync_dist=True, rank_zero_only=True)
 
-    def training_epoch_end(self, outputs):
+    def on_training_epoch_end(self, outputs):
         return self.allsplit_epoch_end("train", outputs)
     # def on_train_epoch_end(self):
     #     epoch_average = torch.stack(self.training_step_outputs).mean()
     #     self.log("training_epoch_average", epoch_average)
     #     self.training_step_outputs.clear()  # free memory
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self, outputs):
         # # ToDo
         # # re-write vislization checkpoint?
         # # visualize validation
@@ -166,7 +166,7 @@ class BaseModel(LightningModule):
             self.save_npy(outputs, phase='val', epoch=self.trainer.current_epoch)
         return self.allsplit_epoch_end("val", outputs)
 
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self, outputs):
         self.save_npy(outputs, phase='test', epoch=self.trainer.current_epoch)
         self.cfg.TEST.REP_I = self.cfg.TEST.REP_I + 1
 

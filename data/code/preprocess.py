@@ -13,8 +13,10 @@ from scipy.io import wavfile
 sys.path.append(os.getcwd()) 
 from dld.data.render_joints.smplfk import SMPLX_Skeleton, do_smplxfk, ax_to_6v, ax_from_6v, SMPLSkeleton, do_smplfk
 from pytorch3d.transforms import (axis_angle_to_matrix, matrix_to_axis_angle)
-
+import librosa
 floor_height = 0
+
+
 
 
 def vectorize_many(data):
@@ -62,6 +64,53 @@ def set_on_ground_139(data, smplx_model, ground_h=0):
 
     return data
 
+def audio_feats_extract(wav_path):
+    FPS = 30 #* 5
+    HOP_LENGTH = 512
+    SR = FPS * HOP_LENGTH
+    EPS = 1e-6
+
+    audio_name = Path(wav_path).stem
+    # remove file extension
+    audio_name = audio_name.split(".")[0]
+    print(f'Processing audio: {audio_name}')
+    
+    data, _ = librosa.load(wav_path, sr=SR)
+
+    envelope = librosa.onset.onset_strength(y=data, sr=SR)  # (seq_len,)
+    print(f'envelope shape: {envelope.shape}')
+    mfcc = librosa.feature.mfcc(y=data, sr=SR, n_mfcc=20).T  # (seq_len, 20)
+    chroma = librosa.feature.chroma_cens(
+        y=data, sr=SR, hop_length=HOP_LENGTH, n_chroma=12
+    ).T  # (seq_len, 12)
+
+    peak_idxs = librosa.onset.onset_detect(
+        onset_envelope=envelope.flatten(), sr=SR, hop_length=HOP_LENGTH
+    )
+    peak_onehot = np.zeros_like(envelope, dtype=np.float32)
+    peak_onehot[peak_idxs] = 1.0  # (seq_len,)
+
+
+    start_bpm = librosa.beat.tempo(y=librosa.load(wav_path)[0])[0]
+
+    tempo, beat_idxs = librosa.beat.beat_track(
+        onset_envelope=envelope,
+        sr=SR,
+        hop_length=HOP_LENGTH,
+        start_bpm=start_bpm,
+        tightness=100,
+    )
+    beat_onehot = np.zeros_like(envelope, dtype=np.float32)
+    beat_onehot[beat_idxs] = 1.0  # (seq_len,)
+
+    audio_feature = np.concatenate(
+        [envelope[:, None], mfcc, chroma, peak_onehot[:, None], beat_onehot[:, None]],
+        axis=-1,
+    )
+    print(f'audio_feature shape: {audio_feature.shape}')
+    exit()
+    return audio_feature
+
 def motion_feats_extract(moinputs_dir, mooutputs_dir, music_indir, music_outdir):
     raw_fps = 30
     data_fps = 30
@@ -83,19 +132,11 @@ def motion_feats_extract(moinputs_dir, mooutputs_dir, music_indir, music_outdir)
         fname = os.path.basename(motion).split(".")[0].replace("_motion", "")
         # fname = data['motion']['file_name']
         wav_path = os.path.join(music_indir, fname + ".wav")
-        sr, music_fea = wavfile.read(wav_path)
-
-        # convert to mono if stereo/multi-channel
-        if music_fea.ndim > 1:
-            music_fea = music_fea.mean(axis=1)
-
-        # convert integers to float32 in [-1,1], preserve floats as float32
-        if np.issubdtype(music_fea.dtype, np.integer):
-            music_fea = music_fea.astype(np.float32) / np.iinfo(music_fea.dtype).max
-        else:
-            music_fea = music_fea.astype(np.float32)
-
+        # process music features
+        music_fea = audio_feats_extract(wav_path)
         np.save(os.path.join(music_outdir, fname+".npy"), music_fea)
+
+
         print(f'motion data shape: {motion_data.shape}')
 
         # convert numpy arrays to torch tensors before calling pytorch3d / SMPL routines
@@ -127,23 +168,19 @@ def motion_feats_extract(moinputs_dir, mooutputs_dir, music_indir, music_outdir)
 
         local_q_axis = local_q_axis_flattened.view(length, 24, 3)  
         local_q_6v_flattented = ax_to_6v(local_q_axis).view(length, 24*6).detach().cpu().numpy()
-        print("contacts_d.shape", contacts_d.shape)
-        print("root_pos.shape", root_pos.shape)
-        print("local_q_6v_flattented.shape", local_q_6v_flattented.shape)
         # root_pos is a torch tensor here; convert to numpy for concatenation
         root_pos_np = root_pos.detach().cpu().numpy().squeeze(0)
         mofeats_input = np.concatenate([contacts_d, root_pos_np, local_q_6v_flattented], axis=-1)
         np.save(os.path.join(mooutputs_dir, fname+".npy"), mofeats_input)
-        print("mofeats_input", mofeats_input.shape)
     return
 
 
 if __name__ == "__main__":
-    # motion_feats_extract(#moinputs_dir='/data2/lrh/dataset/fine_dance/origin/motion_feature315', 
+    # motion_feats_extract(#moinputs_dir='/data2/librosah/dataset/fine_dance/origin/motion_feature315', 
     #                     moinputs_dir='data/finedance/motion/', 
     #                     mooutputs_dir="data/finedance/mofea319/", 
     #                     music_indir="data/finedance/music_npy", 
-    #                     # music_indir="/data2/lrh/dataset/fine_dance/origin/music_feature35_edge",
+    #                     # music_indir="/data2/librosah/dataset/fine_dance/origin/music_feature35_edge",
     #                     music_outdir="data/finedance/music_npynew/", )
     motion_feats_extract(
         moinputs_dir='/fs/nexus-projects/PhysicsFall/editable_dance_project/data/motorica/sliced_motion_smpl',

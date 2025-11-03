@@ -8,9 +8,9 @@
 import torch
 import numpy as np
 
-_EPS4 = np.finfo(float).eps * 4.0
+_EPS4 = np.finfo(np.float64).eps * 4.0
 
-_FLOAT_EPS = np.finfo(np.float).eps
+# _FLOAT_EPS was removed because it was unused; use np.finfo(np.float64).eps directly if needed.
 
 
 import torch
