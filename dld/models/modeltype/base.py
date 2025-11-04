@@ -31,9 +31,14 @@ class BaseModel(LightningModule):
         if self.cfg.FINEDANCE.mode == "single":
             motion = batch_[0]
             if motion.shape[-1] != 263 and motion.shape[-1] != 266:
-                if motion.shape[-1] == 319 or motion.shape[-1] == 139:
-                    motion[:, :, [4,6]]  = motion[:, :, [4,6]] - motion[:, :1, [4,6]]           # The first 4 dimension are foot contact
+                # SMPL format: 151-dim (4 foot contacts + 3 root + 144 joint rots)
+                # SMPLX format: 139-dim or 319-dim
+                if motion.shape[-1] in [151, 139, 319]:
+                    # Normalize root XZ position (indices 4 and 6), keep Y (height at index 5) absolute
+                    # First 4 dims are foot contacts, then [4]=X, [5]=Y, [6]=Z
+                    motion[:, :, [4,6]]  = motion[:, :, [4,6]] - motion[:, :1, [4,6]]
                 else:
+                    # Fallback for other formats
                     motion[:, :, :3] = motion[:, :, :3] - motion[:, :1, :3]
             out = []
             if self.cfg.Norm:
@@ -46,16 +51,15 @@ class BaseModel(LightningModule):
             motion_a, motion_b, music = batch_
 
             if motion_a.shape[-1] != 263 and motion_a.shape[-1] != 266:
-                if motion_a.shape[-1] == 319 or motion_a.shape[-1] == 139:
-                    # motion_a[:, :, 4:7]  = motion_a[:, :, 4:7] - motion_a[:, :1, 4:7]           # The first 4 dimension are foot contact
-                    # motion_b[:, :, 4:7]  = motion_b[:, :, 4:7] - motion_b[:, :1, 4:7] 
-                    motion_a[:, :, 4]  = motion_a[:, :, 4] - motion_a[:, :1, 4]           # The first 4 dimension are foot contact
+                # SMPL format: 151-dim or SMPLX format: 139-dim, 319-dim
+                if motion_a.shape[-1] in [151, 139, 319]:
+                    # Normalize root X and Z positions separately (first 4 dims are foot contacts)
+                    motion_a[:, :, 4]  = motion_a[:, :, 4] - motion_a[:, :1, 4]           # Root X
                     motion_b[:, :, 4]  = motion_b[:, :, 4] - motion_b[:, :1, 4] 
-                    motion_a[:, :, 6]  = motion_a[:, :, 6] - motion_a[:, :1,6]           # The first 4 dimension are foot contact
+                    motion_a[:, :, 6]  = motion_a[:, :, 6] - motion_a[:, :1,6]            # Root Z
                     motion_b[:, :, 6]  = motion_b[:, :, 6] - motion_b[:, :1, 6] 
                 else:
-                    # motion_a[:, :, :3] = motion_a[:, :, :3] - motion_a[:, :1, :3]
-                    # motion_b[:, :, :3] = motion_b[:, :, :3] - motion_b[:, :1, :3]
+                    # Fallback: normalize XY (horizontal) for other formats
                     motion_a[:, :, [0,1]] = motion_a[:, :, [0,1]] - motion_a[:, :1, [0,1]]
                     motion_b[:, :, [0,1]] = motion_b[:, :, [0,1]] - motion_b[:, :1, [0,1]]
             elif motion_a.shape[-1] == 266 or motion_a.shape[-1]==338:
@@ -209,7 +213,7 @@ class BaseModel(LightningModule):
 
     def configure_optimizers(self):
         if self.cfg.Discriminator:
-            return self.optim_g, self.optim_d
+            return [self.optim_g, self.optim_d]
         else:
             return {"optimizer": self.optimizer}
 

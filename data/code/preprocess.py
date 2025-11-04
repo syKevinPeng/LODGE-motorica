@@ -70,6 +70,7 @@ def audio_feats_extract(wav_path):
     SR = FPS * HOP_LENGTH
     EPS = 1e-6
 
+
     audio_name = Path(wav_path).stem
     # remove file extension
     audio_name = audio_name.split(".")[0]
@@ -107,8 +108,7 @@ def audio_feats_extract(wav_path):
         [envelope[:, None], mfcc, chroma, peak_onehot[:, None], beat_onehot[:, None]],
         axis=-1,
     )
-    print(f'audio_feature shape: {audio_feature.shape}')
-    exit()
+    audio_feature = audio_feature[:150, :]  # trim to 5s
     return audio_feature
 
 def motion_feats_extract(moinputs_dir, mooutputs_dir, music_indir, music_outdir):
@@ -135,9 +135,6 @@ def motion_feats_extract(moinputs_dir, mooutputs_dir, music_indir, music_outdir)
         # process music features
         music_fea = audio_feats_extract(wav_path)
         np.save(os.path.join(music_outdir, fname+".npy"), music_fea)
-
-
-        print(f'motion data shape: {motion_data.shape}')
 
         # convert numpy arrays to torch tensors before calling pytorch3d / SMPL routines
         root_pos  = motion_data[:, 0, :3]   # (150, 3)

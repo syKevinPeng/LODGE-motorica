@@ -1,4 +1,4 @@
-NAME: FineDance_relative_Norm_GenreDis_bc190 # Experiment name
+NAME: motorica_relative_Norm_GenreDis_bc190 # Experiment name
 ACCELERATOR: 'gpu' # Devices optioncal: “cpu”, “gpu”, “tpu”, “ipu”, “hpu”, “mps, “auto”
 DEVICE: [0]   #,  #  # Index of gpus eg. [0] or [0,1,2,3]
 
@@ -11,8 +11,8 @@ FineTune: false
 TRAIN:
   STAGE: diffusion    # diffusion
   SPLIT: 'train'
-  NUM_WORKERS: 16 # Number of workers
-  BATCH_SIZE: 190 # Size of batches
+  NUM_WORKERS: 8 # Number of workers
+  BATCH_SIZE: 128 # Size of batches
   START_EPOCH: 1 # Start epoch
   END_EPOCH: 3001 # End epoch
   RESUME: '' # Experiment path to be resumed training
@@ -38,7 +38,7 @@ TRAIN:
 EVAL:
   SPLIT: 'gtest'
   BATCH_SIZE: 32 # Evaluating Batch size
-  NUM_WORKERS: 16 # Evaluating Batch size
+  NUM_WORKERS: 8 # Evaluating Batch size
 
 TEST:
   TEST_DIR: ''
@@ -54,7 +54,7 @@ TEST:
   MM_NUM_TIMES: 10 # Number of times to repeat the multimodal test
   DIVERSITY_TIMES: 300 # Number of times to repeat the diversity test
   REP_I: 0
-  DATASETS: ['FINEDANCE_139CUT']
+  DATASETS: ['motorica']
 
 model:
   target: 'modules'
@@ -132,7 +132,7 @@ LOGGER:
   VAL_EVERY_STEPS: 100
   TENSORBOARD: true
   WANDB:
-    OFFLINE: false
+    MODE: online  # online or offline
     PROJECT: lodge
     RESUME_ID: null
 RENDER:
@@ -160,10 +160,10 @@ DEMO:
 
 FINEDANCE:
   mix: False           # weather do mix data augmention
-  full_seq_len: 256   # 150
-  windows: 8  # 16   #40   #
+  full_seq_len: 150   # 150
+  windows: 150 # 16   #40   #
   is_mirror: False    # weather do mirror data augmention
-  nfeats: 139
+  nfeats: 151
   njoints: 22   
   mode: single  # "single" , "double_react", "double"
   partial: full   # "full" , "morden", "tradition"

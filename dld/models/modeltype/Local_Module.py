@@ -10,7 +10,7 @@ from torchmetrics import MetricCollection
 import time
 from dld.config import instantiate_from_config, get_obj_from_str
 from os.path import join as pjoin
-from dld.data.render_joints.smplfk import SMPLX_Skeleton
+from dld.data.render_joints.smplfk import SMPLSkeleton
 from dld.losses.Joints_loss import Joints_losses
 from dld.models.modeltype.base import BaseModel
 from dld.models.architectures.model import AdversarialLoss, DanceDiscriminator
@@ -82,6 +82,9 @@ class Local_Module(BaseModel):
 
     def __init__(self, cfg, datamodule, **kwargs):
         super().__init__()
+        
+        # Enable manual optimization for multiple optimizers
+        self.automatic_optimization = False
 
         self.cfg = cfg
         self.stage = cfg.TRAIN.STAGE
@@ -105,17 +108,20 @@ class Local_Module(BaseModel):
             self.normalizer = None
 
         # self.DanceDecoder = instantiate_from_config(cfg.model.DanceDecoder)
-        self.smplx_fk = SMPLX_Skeleton(Jpath='data/smplx_neu_J_1.npy', device=cfg.DEVICE) 
-        self.DanceDecoder = get_obj_from_str(cfg.model.DanceDecoder["target"])(smplx_model=self.smplx_fk, normalizer=self.normalizer, genre_num=self.cfg.FINEDANCE.GENRE_NUM,**cfg.model.DanceDecoder.get("params", dict()))
-        
+        self.smpl_fk = SMPLSkeleton()
+        self.DanceDecoder = get_obj_from_str(cfg.model.DanceDecoder["target"])(smpl_model=self.smpl_fk, normalizer=self.normalizer, genre_num=self.cfg.FINEDANCE.GENRE_NUM,**cfg.model.DanceDecoder.get("params", dict()))
+
         # self.dis_model = instantiate_from_config(cfg.model.DanceDiscriminator)
         self.dis_model = get_obj_from_str(cfg.model.DanceDiscriminator["target"])(genre_num=self.cfg.FINEDANCE.GENRE_NUM, **cfg.model.DanceDiscriminator.get("params", dict()))
         self.adv_loss = AdversarialLoss('hinge')
         self.l1_loss = torch.nn.L1Loss()
 
-        self.diffusion = get_obj_from_str(cfg.model.diffusion["target"])(cfg=self.cfg, model=self.DanceDecoder, dis_model=self.dis_model, normalizer= self.normalizer, smplx_model=self.smplx_fk,  **cfg.model.diffusion.get("params", dict()))
+        self.diffusion = get_obj_from_str(cfg.model.diffusion["target"])(cfg=self.cfg, model=self.DanceDecoder, dis_model=self.dis_model, normalizer= self.normalizer, smpl_model=self.smpl_fk,  **cfg.model.diffusion.get("params", dict()))
     
-       
+        # Initialize lists to store step outputs for epoch_end hooks
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
+        self.test_step_outputs = []
        
         # if cfg.TRAIN.OPTIM.TYPE.lower() == "adamw":
         #     self.optimizer = AdamW(lr=cfg.TRAIN.OPTIM.LR,
@@ -380,30 +386,57 @@ class Local_Module(BaseModel):
         l_adv_loss = ((l_dis_real + l_dis_fake) / 2)
         return l_adv_loss
             
-    def on_training_epoch_end(self, outputs):
-        return self.allsplit_epoch_end("train", outputs)
+    def on_training_epoch_end(self):
+        if hasattr(self, 'training_step_outputs') and len(self.training_step_outputs) > 0:
+            outputs = self.training_step_outputs
+            self.allsplit_epoch_end("train", outputs)
+            self.training_step_outputs.clear()
 
-    def on_validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         # print("in validation", self.trainer.current_epoch)
-        if self.trainer.current_epoch % 50 == 0  or  (self.trainer.current_epoch+1) % 50 == 0:       
-            self.save_npy(outputs[0][0], outputs[0][1], phase='val', epoch=self.trainer.current_epoch)
-        return self.allsplit_epoch_end("val", outputs)
+        if hasattr(self, 'validation_step_outputs') and len(self.validation_step_outputs) > 0:
+            outputs = self.validation_step_outputs
+            if self.trainer.current_epoch % 50 == 0  or  (self.trainer.current_epoch+1) % 50 == 0:       
+                self.save_npy(outputs[0][0], outputs[0][1], phase='val', epoch=self.trainer.current_epoch)
+            self.allsplit_epoch_end("val", outputs)
+            self.validation_step_outputs.clear()
 
-    def on_test_epoch_end(self, outputs):
+    def on_test_epoch_end(self):
         print("in test_epoch_end", self.trainer.current_epoch)
-        self.save_npy(outputs[0][0], outputs[0][1], phase='test', epoch=self.trainer.current_epoch)
-        self.cfg.TEST.REP_I = self.cfg.TEST.REP_I + 1
-
-        return self.allsplit_epoch_end("test", outputs)
+        if hasattr(self, 'test_step_outputs') and len(self.test_step_outputs) > 0:
+            outputs = self.test_step_outputs
+            self.save_npy(outputs[0][0], outputs[0][1], phase='test', epoch=self.trainer.current_epoch)
+            self.cfg.TEST.REP_I = self.cfg.TEST.REP_I + 1
+            self.allsplit_epoch_end("test", outputs)
+            self.test_step_outputs.clear()
     
     
-    def training_step(self, batch, batch_idx, optimizer_idx):
+    def training_step(self, batch, batch_idx):
         epoch = int(self.trainer.current_epoch)
         batch = self.get_input(batch, batch_idx)
-        loss = self.allsplit_step("train", batch, batch_idx, epoch, optimizer_idx)
-        # self.training_step_outputs.append(loss)
-
-        return loss
+        
+        if self.cfg.Discriminator:
+            opt_g, opt_d = self.optimizers()
+            
+            # Train generator
+            opt_g.zero_grad()
+            loss_g = self.allsplit_step("train", batch, batch_idx, epoch, optimizer_idx=0)
+            self.manual_backward(loss_g['loss'])
+            opt_g.step()
+            
+            # Train discriminator
+            opt_d.zero_grad()
+            loss_d = self.allsplit_step("train", batch, batch_idx, epoch, optimizer_idx=1)
+            self.manual_backward(loss_d)
+            opt_d.step()
+            
+            # Store outputs for epoch end
+            self.training_step_outputs.append([loss_g, loss_d])
+            return loss_g
+        else:
+            loss = self.allsplit_step("train", batch, batch_idx, epoch)
+            self.training_step_outputs.append(loss)
+            return loss
     
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)
@@ -422,7 +455,9 @@ class Local_Module(BaseModel):
         epoch = int(self.trainer.current_epoch)
         # print("In validation_step! epoch is :", epoch)
         batch = self.get_input(batch, batch_idx)
-        return self.allsplit_step("val", batch, batch_idx, epoch)
+        outputs = self.allsplit_step("val", batch, batch_idx, epoch)
+        self.validation_step_outputs.append(outputs)
+        return outputs
 
     def test_step(self, batch, batch_idx):
         epoch = int(self.trainer.current_epoch)
@@ -430,7 +465,9 @@ class Local_Module(BaseModel):
         batch = self.get_input(batch, batch_idx)
         if len(self.times) *self.cfg.TEST.BATCH_SIZE % (100) > 0 and len(self.times) > 0:
             print(f"Average time per sample ({self.cfg.TEST.BATCH_SIZE*len(self.times)}): ", np.mean(self.times)/self.cfg.TEST.BATCH_SIZE)
-        return self.allsplit_step("test", batch, batch_idx, epoch)
+        outputs = self.allsplit_step("test", batch, batch_idx, epoch)
+        self.test_step_outputs.append(outputs)
+        return outputs
 
             
             

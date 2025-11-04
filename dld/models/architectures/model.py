@@ -11,7 +11,7 @@ from torch.nn import functional as F
 
 from .rotary_embedding_torch import RotaryEmbedding
 from .utils import PositionalEncoding, SinusoidalPosEmb, prob_mask_like
-from dld.data.render_joints.smplfk import SMPLX_Skeleton, do_smplxfk
+from dld.data.render_joints.smplfk import SMPLX_Skeleton, do_smplxfk, SMPLSkeleton, do_smplfk
 
 
 
@@ -743,7 +743,7 @@ class Refine_DanceDecoder(nn.Module):
         cond_feature_dim: int = 35+139,
         activation: Callable[[Tensor], Tensor] = F.gelu,
         use_rotary=True,
-        smplx_model=None,
+        smpl_model=None,
         normalizer=None,
         genre_num=16,
         **kwargs
@@ -753,7 +753,7 @@ class Refine_DanceDecoder(nn.Module):
 
         if activation == "gelu":
             activation = F.gelu
-        self.smplxfk = smplx_model
+        self.smplfk = smpl_model
         self.normalizer = normalizer
         self.mapping = MappingNet(256, latent_dim, genre_num)
         self.latent_dim = latent_dim
@@ -863,6 +863,8 @@ class Refine_DanceDecoder(nn.Module):
         self.refine_seqTransDecoder1 = DecoderLayerStack(refine_decoderstack)
         # self.refine_seqTransDecoder2 = DecoderLayerStack(refine_decoderstack)
         # self.refine_seqTransDecoder3 = DecoderLayerStack(refine_decoderstack)
+        if self.smplfk is None:
+            raise ValueError("SMPL-FK model must be provided for Refine_DanceDecoder.")
     
         
 
@@ -875,33 +877,34 @@ class Refine_DanceDecoder(nn.Module):
 
     def get_rcond(self, output):
         # with torch.no_grad():
-            if self.normalizer is not None:
-                output = self.normalizer.unnormalize(output)
-            joints3d = do_smplxfk(output, self.smplxfk)[:,:,:22,:]
-            B,T,J,_ = joints3d.shape
-            l_ankle_idx, r_ankle_idx, l_foot_idx, r_foot_idx = 7, 8, 10, 11
-            relevant_joints = [l_ankle_idx, r_ankle_idx, l_foot_idx, r_foot_idx]
-            pred_foot = joints3d[:, :, relevant_joints, :]          # B,T,J,4
-            foot_vel = torch.zeros_like(pred_foot)
-            foot_vel[:, :-1] = (
-                pred_foot[:, 1:, :, :] - pred_foot[:, :-1, :, :]
-            )  # (N, S-1, 4, 3)
-            foot_y_ankle = pred_foot[:, :, :2, 1]
-            foot_y_toe = pred_foot[:, :, 2:, 1]
-            fc_mask_ankle = torch.unsqueeze((foot_y_ankle <= (-1.2+0.012)), dim=3).repeat(1, 1, 1, 3)
-            fc_mask_teo = torch.unsqueeze((foot_y_toe <= (-1.2+0.05)), dim=3).repeat(1, 1, 1, 3)
-            contact_lable = torch.cat([fc_mask_ankle, fc_mask_teo], dim=2).int().to(output).reshape(B, T, -1)
+        if self.normalizer is not None:
+            output = self.normalizer.unnormalize(output)
+        # joints3d = do_smplxfk(output, self.smplxfk)[:,:,:22,:]
+        joints3d = do_smplfk(output, self.smplfk)[:,:,:22,:]
+        B,T,J,_ = joints3d.shape
+        l_ankle_idx, r_ankle_idx, l_foot_idx, r_foot_idx = 7, 8, 10, 11
+        relevant_joints = [l_ankle_idx, r_ankle_idx, l_foot_idx, r_foot_idx]
+        pred_foot = joints3d[:, :, relevant_joints, :]          # B,T,J,4
+        foot_vel = torch.zeros_like(pred_foot)
+        foot_vel[:, :-1] = (
+            pred_foot[:, 1:, :, :] - pred_foot[:, :-1, :, :]
+        )  # (N, S-1, 4, 3)
+        foot_y_ankle = pred_foot[:, :, :2, 1]
+        foot_y_toe = pred_foot[:, :, 2:, 1]
+        fc_mask_ankle = torch.unsqueeze((foot_y_ankle <= (-1.2+0.012)), dim=3).repeat(1, 1, 1, 3)
+        fc_mask_teo = torch.unsqueeze((foot_y_toe <= (-1.2+0.05)), dim=3).repeat(1, 1, 1, 3)
+        contact_lable = torch.cat([fc_mask_ankle, fc_mask_teo], dim=2).int().to(output).reshape(B, T, -1)
 
-            contact_toe_thresh, contact_ankle_thresh, contact_vel_thresh = -1.2+0.08, -1.2+0.015, 0.3 / 30           # 30 is fps
-            contact_score_toe = torch.sigmoid((contact_toe_thresh - pred_foot[:, :, :2, 1])/contact_toe_thresh*5) * \
-            torch.sigmoid((contact_vel_thresh - torch.norm(foot_vel[:, :, :2, [0, 2]], dim=-1))/contact_vel_thresh*5)
-            contact_score_toe = torch.unsqueeze(contact_score_toe, dim=3).repeat(1, 1, 1, 3)
-            contact_score_ankle = torch.sigmoid((contact_ankle_thresh - pred_foot[:, :, 2:, 1])/contact_ankle_thresh*5) * \
-            torch.sigmoid((contact_vel_thresh - torch.norm(foot_vel[:, :, 2:, [0, 2]], dim=-1))/contact_vel_thresh*5)
-            contact_score_ankle = torch.unsqueeze(contact_score_ankle, dim=3).repeat(1, 1, 1, 3)
-            contact_score = torch.cat([contact_score_ankle, contact_score_ankle], dim = -2).reshape(B, T, -1)
-            r_cond = torch.cat([contact_lable, contact_score, pred_foot.reshape(B,T,-1), foot_vel.reshape(B,T,-1)], dim = -1) 
-            return r_cond
+        contact_toe_thresh, contact_ankle_thresh, contact_vel_thresh = -1.2+0.08, -1.2+0.015, 0.3 / 30           # 30 is fps
+        contact_score_toe = torch.sigmoid((contact_toe_thresh - pred_foot[:, :, :2, 1])/contact_toe_thresh*5) * \
+        torch.sigmoid((contact_vel_thresh - torch.norm(foot_vel[:, :, :2, [0, 2]], dim=-1))/contact_vel_thresh*5)
+        contact_score_toe = torch.unsqueeze(contact_score_toe, dim=3).repeat(1, 1, 1, 3)
+        contact_score_ankle = torch.sigmoid((contact_ankle_thresh - pred_foot[:, :, 2:, 1])/contact_ankle_thresh*5) * \
+        torch.sigmoid((contact_vel_thresh - torch.norm(foot_vel[:, :, 2:, [0, 2]], dim=-1))/contact_vel_thresh*5)
+        contact_score_ankle = torch.unsqueeze(contact_score_ankle, dim=3).repeat(1, 1, 1, 3)
+        contact_score = torch.cat([contact_score_ankle, contact_score_ankle], dim = -2).reshape(B, T, -1)
+        r_cond = torch.cat([contact_lable, contact_score, pred_foot.reshape(B,T,-1), foot_vel.reshape(B,T,-1)], dim = -1) 
+        return r_cond
 
     def forward(
         self, x: Tensor, cond_embed: Tensor, genre_id:Tensor, times: Tensor, cond_drop_prob: float = 0.0, 

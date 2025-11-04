@@ -77,7 +77,7 @@ def main():
     if cfg.LOGGER.WANDB.PROJECT:
         wandb_logger = pl_loggers.WandbLogger(
             project=cfg.LOGGER.WANDB.PROJECT,
-            offline=cfg.LOGGER.WANDB.OFFLINE,
+            mode = cfg.LOGGER.WANDB.MODE,
             id=cfg.LOGGER.WANDB.RESUME_ID,
             save_dir=cfg.FOLDER_EXP,
             version="",
@@ -114,7 +114,7 @@ def main():
 
     # callbacks
     callbacks = [
-        pl.callbacks.RichProgressBar(),
+        pl.callbacks.TQDMProgressBar(refresh_rate=10),
         ProgressLogger(metric_monitor=metric_monitor),
         # ModelCheckpoint(dirpath=os.path.join(cfg.FOLDER_EXP,'checkpoints'),filename='latest-{epoch}',every_n_epochs=1,save_top_k=1,save_last=True,save_on_train_epoch_end=True),
         ModelCheckpoint(
@@ -176,6 +176,7 @@ def main():
                     datamodule=datasets[0],
                     ckpt_path=cfg.TRAIN.PRETRAINED)
     else:
+        print(f'train datamodule: {datasets[0]}')
         trainer.fit(model, datamodule=datasets[0])
 
     # checkpoint

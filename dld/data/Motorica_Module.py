@@ -9,7 +9,7 @@ from .FineDance_dataset import FineDance_Smpl
 from .Motorica_dataset import Motorica_Smpl
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
-from .render_joints.smplfk import SMPLX_Skeleton, ax_from_6v, SMPLSkeleton
+from .render_joints.smplfk import ax_from_6v, SMPLSkeleton
 
 
 class MotoricaDataModule(pl.LightningDataModule):
@@ -26,7 +26,7 @@ class MotoricaDataModule(pl.LightningDataModule):
         self.name = name
         self.kwargs = kwargs
         self.is_mm = False
-        self.smpl_fk = SMPLSkeleton(device=cfg.DEVICE)        
+        self.smpl_fk = SMPLSkeleton()        
         # self.save_hyperparameters(logger=False)
         # self.njoints = 52       # 55
     def setup(self, stage=None):
@@ -47,22 +47,6 @@ class MotoricaDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.testset, batch_size=self.cfg.TEST.BATCH_SIZE, num_workers=self.num_workers, shuffle=False, drop_last=True)
-
-
-    def feats2joints(self, features):
-        # mean = torch.tensor(self.hparams.mean).to(features)
-        # std = torch.tensor(self.hparams.std).to(features)
-        # features = features * std + mean
-        if features.shape[2] == 315:    
-            trans, rot6d = torch.split(features, (3, features.shape[2] - 3), dim=2)      # 前4维是foot contact
-            b, s, c = rot6d.shape
-            local_q_156 = ax_from_6v(rot6d.reshape(b, s, -1, 6)) 
-            joints = self.smpl_fk.forward(local_q_156, trans)
-            joints = joints.view(b, s, 55, 3)
-            return joints
-        else: 
-            print("shape IS", features.shape)
-            raise("feats2joints's input shape error!!!!")
         
 
     def mm_mode(self, mm_on=True):

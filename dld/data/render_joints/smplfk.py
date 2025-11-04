@@ -20,11 +20,13 @@ from typing import NewType
 Tensor = NewType('Tensor', torch.Tensor)
 import torch.nn.functional as F
 import pickle
+import smplx
 
 
 from pytorch3d.transforms import (axis_angle_to_matrix, matrix_to_axis_angle,
                                   matrix_to_quaternion, matrix_to_rotation_6d,
                                   quaternion_to_matrix, rotation_6d_to_matrix, quaternion_to_axis_angle)
+
 
 
 def quat_to_6v(q):
@@ -117,18 +119,17 @@ def do_smplxfk(data, smplx_model):
     return positions
 
 def do_smplfk(data, smpl_model):
-    # data : N, 69 or B,T,69
-    dimen = 0
-    if not data.shape[-1] == 69:
-        raise("data.shape error")
-    if len(data.shape) == 3:
-        dimen = 3
-        B,T,_ = data.shape
-        data = data.reshape(-1, _)
+    # data : last dim shape: contact (4) + translation (3)+ joints 24 x 6 (6D rep) = 
+    dimen = len(data.shape)
+    if not data.shape[-1] == 151:
+        raise Exception(f"Expecting data shape [-1]==151, but got {data.shape}")
+    if dimen == 3:
+        B,T, feat_dim = data.shape
+        data = data.reshape(-1, feat_dim)
     
     assert len(data.shape) == 2
     length ,_ = data.shape
-    poses = data[:,7:69].reshape(length, 22, 6) # check this later.
+    poses = data[:,7:].reshape(length, 24, 6) # check this later.
     # DEBUG
     # poses = poses[:,:,:3]
     poses = ax_from_6v(poses)
@@ -517,76 +518,120 @@ def skeleton_render(
 
 class SMPLSkeleton:
     def __init__(
-        self, device=None,
+        self, device=None, model_path='/fs/nexus-projects/PhysicsFall/data/smpl/models', gender='neutral'
     ):
-        offsets = smpl_offsets
-        parents = smpl_parents
-        assert len(offsets) == len(parents)
-
-        self._offsets = torch.Tensor(offsets)   #.to(device)
-        self._parents = np.array(parents)
-        self._compute_metadata()
-
-    def _compute_metadata(self):
-        self._has_children = np.zeros(len(self._parents)).astype(bool)
-        for i, parent in enumerate(self._parents):
-            if parent != -1:
-                self._has_children[parent] = True
-
-        self._children = []
-        for i, parent in enumerate(self._parents):
-            self._children.append([])
-        for i, parent in enumerate(self._parents):
-            if parent != -1:
-                self._children[parent].append(i)
+        """
+        Initialize SMPL skeleton using smplx library.
+        
+        Parameters
+        ----------
+        device : str or torch.device
+            Device to run the model on (defaults to 'cuda' if available, else 'cpu')
+        model_path : str
+            Path to SMPL model files
+        gender : str
+            Gender of the model ('neutral', 'male', or 'female')
+        """
+        
+        # if device is None:
+        #     self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # else:
+        #     self.device = device
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Initialize SMPL model from smplx library
+        self.smpl_model = smplx.create(
+            model_path=model_path,
+            model_type='smpl',
+            gender=gender,
+            batch_size=1,
+            use_face_contour=False,
+            ext='pkl'
+        ).to(self.device)
+        
+        self._parents = smpl_parents
 
     def forward(self, rotations, root_positions):
         """
-        Perform forward kinematics using the given trajectory and local rotations.
-        Arguments (where N = batch size, L = sequence length, J = number of joints):
-         -- rotations: (N, L, J, 3) tensor of axis-angle rotations describing the local rotations of each joint.
-         -- root_positions: (N, L, 3) tensor describing the root joint positions.
+        Compute forward kinematics for the SMPL skeleton using smplx library.
+
+        Parameters
+        ----------
+        rotations : torch.Tensor
+            Axis-angle local rotations. Supported input shapes:
+            - (B, S, J, 3)  : batched sequences (batch B, frames S, joints J)
+            - (S, J, 3)     : single sequence (frames S, joints J)
+            - (B, S, J*3) or (S, J*3) : flattened last axis
+        root_positions : torch.Tensor
+            Root translations. Supported shapes:
+            - (B, S, 3) : batched sequences
+            - (S, 3)    : single sequence
+
+        Returns
+        -------
+        torch.Tensor
+            Global joint positions. Returned shape matches the input batching:
+            - (B, S, J, 3) if a batched sequence was provided
+            - (S, J, 3) for single sequence inputs
         """
-        assert len(rotations.shape) == 4
-        assert len(root_positions.shape) == 3
-        # transform from axis angle to quaternion
-        fk_device = rotations.device
-        self._offsets.to(fk_device)
-        rotations = axis_angle_to_quaternion(rotations)
-
-        positions_world = []
-        rotations_world = []
-
-        expanded_offsets = self._offsets.expand(
-            rotations.shape[0],
-            rotations.shape[1],
-            self._offsets.shape[0],
-            self._offsets.shape[1],
-        ).to(fk_device)
-
-        # Parallelize along the batch and time dimensions
-        for i in range(self._offsets.shape[0]):
-            if self._parents[i] == -1:
-                positions_world.append(root_positions)
-                rotations_world.append(rotations[:, :, 0])
+        # Track original shape for reconstruction
+        has_batch_dim = False
+        
+        # Handle root_positions
+        if len(root_positions.shape) == 3:
+            # (B, S, 3) -> merge batch and sequence
+            has_batch_dim = True
+            b, s, c = root_positions.shape
+            root_positions = root_positions.view(b*s, c)
+        elif len(root_positions.shape) == 2:
+            # (S, 3) -> already correct for processing
+            s = root_positions.shape[0]
+        
+        # Handle rotations
+        if len(rotations.shape) == 4:
+            # (B, S, J, 3) -> merge batch and sequence
+            has_batch_dim = True
+            b, s, j, feat = rotations.shape
+            rotations = rotations.view(b*s, j, feat)
+        elif len(rotations.shape) == 3:
+            # Two cases: (B, S, J*3) or (S, J, 3)
+            if rotations.shape[-1] == 3:
+                # (S, J, 3) -> already correct
+                s, j, feat = rotations.shape
             else:
-                positions_world.append(
-                    quaternion_apply(
-                        rotations_world[self._parents[i]], expanded_offsets[:, :, i]
-                    )
-                    + positions_world[self._parents[i]]
-                )
-                if self._has_children[i]:
-                    rotations_world.append(
-                        quaternion_multiply(
-                            rotations_world[self._parents[i]], rotations[:, :, i]
-                        )
-                    )
-                else:
-                    # This joint is a terminal node -> it would be useless to compute the transformation
-                    rotations_world.append(None)
-
-        return torch.stack(positions_world, dim=3).permute(0, 1, 3, 2)
+                # (B, S, J*3) -> merge batch and sequence, then reshape
+                has_batch_dim = True
+                b, s, feat = rotations.shape
+                rotations = rotations.view(b*s, -1, 3)
+        else:
+            raise ValueError("Unsupported shape for rotations tensor")
+        
+        # Ensure tensors are on correct device
+        rotations = rotations.to(self.device)
+        root_positions = root_positions.to(self.device)
+        
+        # Flatten pose parameters (smplx expects body_pose as (N, 69) for SMPL)
+        # SMPL has 24 joints, first is root (global orient), remaining 23 are body
+        batch_size = rotations.shape[0]
+        global_orient = rotations[:, 0:1, :].reshape(batch_size, 3)  # Root rotation
+        body_pose = rotations[:, 1:, :].reshape(batch_size, -1)  # Remaining joints
+        
+        # Run SMPL forward pass
+        output = self.smpl_model(
+            global_orient=global_orient,
+            body_pose=body_pose,
+            transl=root_positions,
+            return_verts=False
+        )
+        
+        # Get joint positions
+        joints = output.joints  # (N, J, 3)
+        
+        # Reshape output to match input batching
+        if has_batch_dim:
+            joints = joints.view(b, s, -1, 3)
+        
+        return joints
 
 
 class SMPLX_Skeleton:

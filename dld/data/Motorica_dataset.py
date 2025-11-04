@@ -100,13 +100,12 @@ class Motorica_Smpl(data.Dataset):
             music = np.load(os.path.join(self.music_dir, name))
 
             min_all_len = min(motion.shape[0], music.shape[0])
-            print(f'min_all_len for {name}: {min_all_len}')
             motion = motion[:min_all_len]
           
             # hand smpl motion shape
             if motion.shape[-1] == 151 and args.FINEDANCE.nfeats ==139:
                 motion = motion[:,:139]
-            elif motion.shape[-1] == 151:
+            elif motion.shape[-1] == 151: # 151 dims: contacts(4) + root pos(3) + local 6D(24*6=144)
                 pass
             else:
                 print("motion.shape", motion.shape)
@@ -148,19 +147,19 @@ class Motorica_Smpl(data.Dataset):
             music_all.append(music)
             genre_list.append(genre)
 
-        self.motion = np.concatenate(motion_all, axis=0).astype(np.float32)
-        self.music = np.concatenate(music_all, axis=0).astype(np.float32)
+        self.motion_list = [m.astype(np.float32) for m in motion_all]
+        self.music_list = [m.astype(np.float32) for m in music_all]
         self.genre_list = genre_list
 
-        self.len = len(self.motion_index)
-        print(f'FineDance has {self.len} samples..')
+        self.len = len(self.motion_list)
+        print(f'Motorica has {self.len} samples..')
 
     def __len__(self):
         return self.len
 
     def __getitem__(self, index):
-        motion = self.motion[index]
-        music = self.music[index]
+        motion = self.motion_list[index]
+        music = self.music_list[index]
         genre = self.genre_list[index]
         return motion, music, genre
     

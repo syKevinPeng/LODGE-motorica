@@ -14,8 +14,8 @@ import gc
 
 from dld.config import instantiate_from_config, get_obj_from_str
 from os.path import join as pjoin
-from dld.data.render_joints.smplfk import do_smplxfk
-from dld.data.render_joints.smplfk import SMPLX_Skeleton
+from dld.data.render_joints.smplfk import do_smplxfk, do_smplfk
+from dld.data.render_joints.smplfk import SMPLSkeleton
 from dld.models.modeltype.base import BaseModel
 from torch.optim import Optimizer
 from pathlib import Path
@@ -114,8 +114,8 @@ class Global_Module(BaseModel):
         # self.Loss_Module = instantiate_from_config(cfg.model.normalizer)
 
         self.DanceDecoder = instantiate_from_config(cfg.model.DanceDecoder)
-        self.smplx_fk = SMPLX_Skeleton(Jpath='data/smplx_neu_J_1.npy', device=cfg.DEVICE) 
-        self.diffusion = get_obj_from_str(cfg.model.diffusion["target"])(cfg=self.cfg, model=self.DanceDecoder, normalizer= self.normalizer, smplx_model=self.smplx_fk,  **cfg.model.diffusion.get("params", dict()))
+        self.smpl_fk = SMPLSkeleton()
+        self.diffusion = get_obj_from_str(cfg.model.diffusion["target"])(cfg=self.cfg, model=self.DanceDecoder, normalizer= self.normalizer, smpl_model=self.smpl_fk,  **cfg.model.diffusion.get("params", dict()))
        
        
         if cfg.TRAIN.OPTIM.TYPE.lower() == "adamw":
@@ -177,7 +177,9 @@ class Global_Module(BaseModel):
         if self.nfeats == 263:
             posi = recover_from_ric(motion, 22)
         elif self.nfeats == 139:
-            posi = do_smplxfk(motion, self.smplx_fk)
+            posi = do_smplxfk(motion, self.smpl_fk)
+        elif self.nfeats == 151:
+            posi = do_smplfk(motion, self.smpl_fk)
         # print("posi", posi.shape)
         posi = posi.detach().cpu().numpy()
         mobeatlist = []

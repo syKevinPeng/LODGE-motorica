@@ -22,7 +22,7 @@ DATASET:
     normalizer: data/Normalizer.pth
     LABEL: data/finedance/label_json/
     # LABEL: /data2/lrh/dataset/fine_dance/origin/label_json/
-  motorica:
+  MOTORICA:
     ROOT: /fs/nexus-projects/PhysicsFall/LODGE/data/motorica
     MOTION: /fs/nexus-projects/PhysicsFall/LODGE/data/motorica/mofea319
     MUSIC: /fs/nexus-projects/PhysicsFall/LODGE/data/motorica/music_npynew

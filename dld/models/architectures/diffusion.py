@@ -50,7 +50,7 @@ class GaussianDiffusion(nn.Module):
         normalizer,
         horizon,
         repr_dim,
-        smplx_model,
+        smpl_model,
         n_timestep=1000,
         schedule="linear",
         loss_type="l1",
@@ -77,7 +77,7 @@ class GaussianDiffusion(nn.Module):
         self.cond_drop_prob = cond_drop_prob
 
         # make a SMPL instance for FK module
-        self.smplx_fk = smplx_model
+        self.smpl_fk = smpl_model
 
         betas = torch.Tensor(
             make_beta_schedule(schedule=schedule, n_timestep=n_timestep)
@@ -601,8 +601,8 @@ class GaussianDiffusion(nn.Module):
         target_q = ax_from_6v(target[:, :, 3:].reshape(b, s, -1, 6))
         b, s, nums, c_ = model_q.shape
 
-        model_xp = self.smplx_fk.forward(model_q, model_x)
-        target_xp = self.smplx_fk.forward(target_q, target_x)
+        model_xp = self.smpl_fk.forward(model_q, model_x)
+        target_xp = self.smpl_fk.forward(target_q, target_x)
         model_xp = model_xp.view(b, s, -1, 3)
         target_xp = target_xp.view(b, s, -1, 3) 
 
@@ -679,8 +679,8 @@ class GaussianDiffusion(nn.Module):
         target_q = ax_from_6v(target[:, :, 3:].reshape(b, s, -1, 6))
         b, s, nums, c_ = model_q.shape
 
-        model_xp = self.smplx_fk.forward(model_q, model_x)
-        target_xp = self.smplx_fk.forward(target_q, target_x)
+        model_xp = self.smpl_fk.forward(model_q, model_x)
+        target_xp = self.smpl_fk.forward(target_q, target_x)
         model_xp = model_xp.view(b, s, -1, 3)
         target_xp = target_xp.view(b, s, -1, 3) 
 

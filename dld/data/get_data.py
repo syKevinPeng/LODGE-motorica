@@ -37,4 +37,6 @@ def get_datasets(cfg, logger=None, phase="train"):
       
     # cfg.DATASET.NFEATS = datasets[0].nfeats
     # cfg.DATASET.NJOINTS = datasets[0].njoints
+    if len(datasets) == 0:
+        raise NotImplementedError(f"Dataset {dataset_name} is not implemented.")
     return datasets
