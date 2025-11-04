@@ -607,8 +607,13 @@ class SMPLSkeleton:
             raise ValueError("Unsupported shape for rotations tensor")
         
         # Ensure tensors are on correct device
-        rotations = rotations.to(self.device)
-        root_positions = root_positions.to(self.device)
+        # In DDP, get device from input data instead of self.device
+        input_device = rotations.device
+        if self.smpl_model.v_template.device != input_device:
+            self.smpl_model = self.smpl_model.to(input_device)
+        
+        rotations = rotations.to(input_device)
+        root_positions = root_positions.to(input_device)
         
         # Flatten pose parameters (smplx expects body_pose as (N, 69) for SMPL)
         # SMPL has 24 joints, first is root (global orient), remaining 23 are body

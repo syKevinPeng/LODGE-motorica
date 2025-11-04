@@ -430,11 +430,33 @@ class Local_Module(BaseModel):
             self.manual_backward(loss_d)
             opt_d.step()
             
+            # Log step-level losses immediately for W&B (manual optimization requires explicit logging)
+            if self.trainer.global_step % self.cfg.LOGGER.LOG_EVERY_STEPS == 0:
+                log_dict = {}
+                for key, value in loss_g.items():
+                    if isinstance(value, torch.Tensor):
+                        log_dict[f"{key}/train_step"] = value.item()
+                    else:
+                        log_dict[f"{key}/train_step"] = value
+                log_dict["discriminator_loss/train_step"] = loss_d.item() if isinstance(loss_d, torch.Tensor) else loss_d
+                self.log_dict(log_dict, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
+            
             # Store outputs for epoch end
             self.training_step_outputs.append([loss_g, loss_d])
             return loss_g
         else:
             loss = self.allsplit_step("train", batch, batch_idx, epoch)
+            
+            # Log step-level loss immediately for W&B
+            if self.trainer.global_step % self.cfg.LOGGER.LOG_EVERY_STEPS == 0:
+                log_dict = {}
+                for key, value in loss.items():
+                    if isinstance(value, torch.Tensor):
+                        log_dict[f"{key}/train_step"] = value.item()
+                    else:
+                        log_dict[f"{key}/train_step"] = value
+                self.log_dict(log_dict, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
+            
             self.training_step_outputs.append(loss)
             return loss
     
@@ -575,7 +597,7 @@ class Local_Module(BaseModel):
                 else:
                     motion_rst = self.normalizer.unnormalize(motion_rst)
 
-            if cfg.TEST.DATASETS[0].lower() in ["finedance",  "finedance_139cut",  "aistpp",  "aistpp_60FPS"]:
+            if cfg.TEST.DATASETS[0].lower() in ["finedance",  "finedance_139cut",  "aistpp",  "aistpp_60FPS", 'motorica']:
                 for i in range(len(motion_rst)):
                     if cfg.TEST.REPLICATION_TIMES > 1:
                         if phase == 'test':

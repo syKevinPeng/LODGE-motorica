@@ -1,13 +1,14 @@
 import os
 from pprint import pformat
 import sys
+from datetime import timedelta
 
 import pytorch_lightning as pl
 import torch
 from omegaconf import OmegaConf
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import ModelCheckpoint
-# from pytorch_lightning.strategies.ddp import DDPStrategy
+from pytorch_lightning.callbacks import ModelCheckpoint, RichProgressBar
+from pytorch_lightning.strategies import DDPStrategy
 
 from dld.callback import ProgressLogger
 from dld.config import parse_args
@@ -71,6 +72,17 @@ def main():
         os.environ["PYTHONWARNINGS"] = "ignore"
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
         # os.environ['CUDA_VISIBLE_DEVICES'] = ",".join(str(x) for x in cfg.DEVICE)
+        
+        # Set network interface for DDP in SLURM (helps with process communication)
+        if len(cfg.DEVICE) > 1:
+            # For single-node multi-GPU, use loopback interface
+            # This avoids network interface issues when GPUs are on the same machine
+            os.environ['NCCL_DEBUG'] = 'INFO'  # Enable NCCL debugging
+            os.environ['NCCL_P2P_DISABLE'] = '0'  # Enable P2P (peer-to-peer) for same-node GPUs
+            os.environ['NCCL_IB_DISABLE'] = '1'  # Disable InfiniBand (not needed for single node)
+            # Use loopback for single-node communication
+            if not os.environ.get('NCCL_SOCKET_IFNAME'):
+                os.environ['NCCL_SOCKET_IFNAME'] = 'lo'  # Use loopback interface
 
     # tensorboard logger and wandb logger
     loggers = []
@@ -113,26 +125,33 @@ def main():
     }
 
     # callbacks
+    ckpt_cb = ModelCheckpoint(
+        dirpath=os.path.join(cfg.FOLDER_EXP, "checkpoints"),
+        filename="{epoch}",
+        monitor="step",
+        mode="max",
+        every_n_epochs=cfg.LOGGER.SACE_CHECKPOINT_EPOCH,
+        save_top_k=-1,      
+        save_last=False,
+        save_on_train_epoch_end=True,
+    )
     callbacks = [
-        pl.callbacks.TQDMProgressBar(refresh_rate=10),
+        RichProgressBar(refresh_rate=10),
         ProgressLogger(metric_monitor=metric_monitor),
-        # ModelCheckpoint(dirpath=os.path.join(cfg.FOLDER_EXP,'checkpoints'),filename='latest-{epoch}',every_n_epochs=1,save_top_k=1,save_last=True,save_on_train_epoch_end=True),
-        ModelCheckpoint(
-            dirpath=os.path.join(cfg.FOLDER_EXP, "checkpoints"),
-            filename="{epoch}",
-            monitor="step",
-            mode="max",
-            every_n_epochs=cfg.LOGGER.SACE_CHECKPOINT_EPOCH,
-            save_top_k=-1,      # 根据monitor保存最好的几个
-            save_last=False,
-            save_on_train_epoch_end=True,
-        ),
+        ckpt_cb,
     ]
     logger.info("Callbacks initialized")
 
     if len(cfg.DEVICE) > 1:
-        # ddp_strategy = DDPStrategy(find_unused_parameters=False)
-        ddp_strategy = "ddp"
+        # Configure DDP strategy with proper timeout for SLURM
+        # Use process_group_backend='nccl' and bypass SLURM's cluster environment detection
+        # find_unused_parameters=True is required for GAN training with manual optimization
+        from lightning_fabric.plugins.environments.lightning import LightningEnvironment
+        ddp_strategy = DDPStrategy(
+            find_unused_parameters=True,  # Required for GAN - generator/discriminator trained separately
+            timeout=timedelta(seconds=7200),  # 2 hours timeout
+            cluster_environment=LightningEnvironment(),  # Override SLURM detection
+        )
     else:
         ddp_strategy = 'auto'
 
@@ -142,13 +161,14 @@ def main():
         max_epochs=cfg.TRAIN.END_EPOCH,
         accelerator=cfg.ACCELERATOR,
         devices=cfg.DEVICE,
+        num_nodes=1,  # Single node with multiple GPUs
         strategy=ddp_strategy,
         # move_metrics_to_cpu=True,
         default_root_dir=cfg.FOLDER_EXP,
         log_every_n_steps=cfg.LOGGER.LOG_EVERY_STEPS,
         deterministic=False,
         detect_anomaly=False,
-        enable_progress_bar=True,
+        enable_progress_bar=True,  # Enable Rich progress bar on rank 0
         logger=loggers,
         callbacks=callbacks,
         check_val_every_n_epoch=cfg.LOGGER.VAL_EVERY_STEPS,
@@ -176,11 +196,10 @@ def main():
                     datamodule=datasets[0],
                     ckpt_path=cfg.TRAIN.PRETRAINED)
     else:
-        print(f'train datamodule: {datasets[0]}')
         trainer.fit(model, datamodule=datasets[0])
 
     # checkpoint
-    checkpoint_folder = trainer.checkpoint_callback.dirpath
+    checkpoint_folder = getattr(ckpt_cb, 'dirpath', os.path.join(cfg.FOLDER_EXP, "checkpoints"))
     logger.info(f"The checkpoints are stored in {checkpoint_folder}")
     logger.info(
         f"The outputs of this experiment are stored in {cfg.FOLDER_EXP}")

@@ -75,92 +75,85 @@ class Motorica_Smpl(data.Dataset):
         self.istrain = istrain
         self.args = args
         self.seq_len = args.FINEDANCE.full_seq_len
-        slide = 1 # since we are loading sliced data, slide is 1
 
         self.motion_index = []
         self.music_index = []
-        motion_all = []
-        music_all = []
-        genre_list = []
 
         
-        ignor_list, train_list, test_list = self.get_train_test_list(dataset = dataname)
+        ignore_list, train_list, test_list = self.get_train_test_list(dataset = dataname)
+
+        for name in ignore_list:
+            if name in train_list:
+                train_list.remove(name)
+            if name in test_list:
+                test_list.remove(name)
+
         if self.istrain:
             self.datalist= train_list
         else:
-            self.datalist = test_list
+            self.datalist = test_list         
 
-        total_length = 0            
 
-        for name in tqdm(self.datalist):
-            name = name + ".npy"
-            if name[:-4] in ignor_list:
-                continue
-            motion = np.load(os.path.join(self.motion_dir, name))
-            music = np.load(os.path.join(self.music_dir, name))
+        # for name in tqdm(self.datalist):
+        #     name = name + ".npy"
+        #     if name[:-4] in ignor_list:
+        #         continue
+        #     motion = np.load(os.path.join(self.motion_dir, name))
+        #     music = np.load(os.path.join(self.music_dir, name))
 
-            min_all_len = min(motion.shape[0], music.shape[0])
-            motion = motion[:min_all_len]
+        #     min_all_len = min(motion.shape[0], music.shape[0])
+        #     motion = motion[:min_all_len]
           
-            # hand smpl motion shape
-            if motion.shape[-1] == 151 and args.FINEDANCE.nfeats ==139:
-                motion = motion[:,:139]
-            elif motion.shape[-1] == 151: # 151 dims: contacts(4) + root pos(3) + local 6D(24*6=144)
-                pass
-            else:
-                print("motion.shape", motion.shape)
-                raise("input motion shape error!")
-            # sanity check if the music and motion are aligned
-            assert motion.shape[0] == music.shape[0], f"motion and music length not equal for {name}! {motion.shape[0]} vs {music.shape[0]}"             
-           
-            nums = 1
-            genre_name = name.split('_')[1]
-            genre_id = np.array(Genres_Motorica[genre_name])
-            genre = torch.from_numpy(genre_id).unsqueeze(0)
+        #     # hand smpl motion shape
+        #     if motion.shape[-1] == 151 and args.FINEDANCE.nfeats ==139:
+        #         motion = motion[:,:139]
+        #     elif motion.shape[-1] == 151: # 151 dims: contacts(4) + root pos(3) + local 6D(24*6=144)
+        #         pass
+        #     else:
+        #         print("motion.shape", motion.shape)
+        #         raise("input motion shape error!")
+        #     # sanity check if the music and motion are aligned
+        #     assert motion.shape[0] == music.shape[0], f"motion and music length not equal for {name}! {motion.shape[0]} vs {music.shape[0]}"             
 
-            # since we are loading sliced data, we don't slice again here
-            # if self.istrain:
-            #     clip_index = []
-            #     for i in range(nums):
-            #         motion_clip = motion[i * slide: i * slide + self.seq_len]
-            #         if motion_clip.std(axis=0).mean() > 0.07:           # judge wheather the motion clip is effective
-            #             clip_index.append(i)
-            #     index = np.array(clip_index) * slide + total_length     # clip_index is local index 
-            #     genre_list = genre_list + len(clip_index)*[genre]
-            # else:
-            #     index = np.arange(nums) * slide + total_length
-            #     genre_list = genre_list + nums*[genre]
+        #     genre_name = name.split('_')[1]
+        #     genre_id = np.array(Genres_Motorica[genre_name])
+        #     genre = torch.from_numpy(genre_id).unsqueeze(0)
 
-            if args.FINEDANCE.mix:
-                raise NotImplementedError("mix not implemented for Motorica yet")
-            # else:
-            #     motion_index = index.tolist()
-            #     music_index = index.tolist()
+        #     if args.FINEDANCE.mix:
+        #         raise NotImplementedError("mix not implemented for Motorica yet")
 
-            
-            # self.motion_index += motion_index
-            # self.music_index += music_index
-            # total_length += min_all_len
+        #     motion_all.append(motion)
+        #     music_all.append(music)
+        #     genre_list.append(genre)
 
-            # assert len(self.motion_index) == len(genre_list)
-            motion_all.append(motion)
-            music_all.append(music)
-            genre_list.append(genre)
+        # self.motion_list = [m.astype(np.float32) for m in motion_all]
+        # self.music_list = [m.astype(np.float32) for m in music_all]
+        # self.genre_list = genre_list
 
-        self.motion_list = [m.astype(np.float32) for m in motion_all]
-        self.music_list = [m.astype(np.float32) for m in music_all]
-        self.genre_list = genre_list
-
-        self.len = len(self.motion_list)
-        print(f'Motorica has {self.len} samples..')
+        # self.len = len(self.motion_list)
+        # print(f'Motorica has {self.len} samples..')
 
     def __len__(self):
-        return self.len
+        return len(self.datalist)
 
     def __getitem__(self, index):
-        motion = self.motion_list[index]
-        music = self.music_list[index]
-        genre = self.genre_list[index]
+
+        name = self.datalist[index] + ".npy"
+        motion = np.load(os.path.join(self.motion_dir, name))
+        music = np.load(os.path.join(self.music_dir, name))
+
+        min_all_len = min(motion.shape[0], music.shape[0])
+        motion = motion[:min_all_len]
+        
+        # hand smpl motion shape
+        assert motion.shape[-1] == 151, "input motion shape error!"
+        # sanity check if the music and motion are aligned
+        assert motion.shape[0] == music.shape[0], f"motion and music length not equal for {name}! {motion.shape[0]} vs {music.shape[0]}"             
+
+        genre_name = name.split('_')[1]
+        genre_id = np.array(Genres_Motorica[genre_name])
+        genre = torch.from_numpy(genre_id).unsqueeze(0)
+
         return motion, music, genre
     
     def get_train_test_list(self, dataset="FineDance"):
