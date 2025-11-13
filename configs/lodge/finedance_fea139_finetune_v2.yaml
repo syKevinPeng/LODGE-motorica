@@ -167,3 +167,4 @@ FINEDANCE:
   mode: single  # "single" , "double_react", "double"
   partial: full   # "full" , "morden", "tradition"
   GENRE_NUM: 16
+  

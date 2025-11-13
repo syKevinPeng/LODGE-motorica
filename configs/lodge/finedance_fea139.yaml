@@ -1,6 +1,6 @@
 NAME: motorica_relative_Norm_GenreDis_bc190 # Experiment name
 ACCELERATOR: 'gpu' # Devices optioncal: “cpu”, “gpu”, “tpu”, “ipu”, “hpu”, “mps, “auto”
-DEVICE: [0, 1,2,3]   #,  #  # Index of gpus eg. [0] or [0,1,2,3]
+DEVICE: [0, 1]   #,  #  # Index of gpus eg. [0] or [0,1,2,3]
 
 # FOLDER: ./experiments
 SEED_VALUE: 1234
@@ -12,12 +12,12 @@ TRAIN:
   STAGE: diffusion    # diffusion
   SPLIT: 'train'
   NUM_WORKERS: 8 # Number of workers
-  BATCH_SIZE: 32*4 # Size of batches (reduced from 32 - 4 samples per GPU to avoid OOM)
-  START_EPOCH: 1 # Start epoch
-  END_EPOCH: 3001 # End epoch
+  BATCH_SIZE: 64 
+  START_EPOCH: 299 # Start epoch
+  END_EPOCH: 1500 # End epoch
   RESUME: '' # Experiment path to be resumed training
   # PRETRAINED_VAE: ''
-  PRETRAINED: '' # Pretrained model path
+  PRETRAINED: '/fs/nexus-projects/PhysicsFall/LODGE/experiments/Local_Module/debug--motorica_relative_Norm_GenreDis_bc190/checkpoints/epoch=299.ckpt' # Pretrained model path
   DATASETS: ['motorica'] #['motorica'] #['FINEDANCE_139CUT'] # Training datasets
 
   OPTIM:

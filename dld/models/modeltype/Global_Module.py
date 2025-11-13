@@ -117,6 +117,10 @@ class Global_Module(BaseModel):
         self.smpl_fk = SMPLSkeleton()
         self.diffusion = get_obj_from_str(cfg.model.diffusion["target"])(cfg=self.cfg, model=self.DanceDecoder, normalizer= self.normalizer, smpl_model=self.smpl_fk,  **cfg.model.diffusion.get("params", dict()))
        
+        # Initialize lists to store step outputs for epoch_end hooks
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
+        self.test_step_outputs = []
        
         if cfg.TRAIN.OPTIM.TYPE.lower() == "adamw":
             self.optimizer = AdamW(lr=cfg.TRAIN.OPTIM.LR,
@@ -258,35 +262,55 @@ class Global_Module(BaseModel):
             
  
             
-    def on_training_epoch_end(self, outputs):
-        return self.allsplit_epoch_end("train", outputs)
+    def on_training_epoch_end(self):
+        if hasattr(self, 'training_step_outputs') and len(self.training_step_outputs) > 0:
+            outputs = self.training_step_outputs
+            self.allsplit_epoch_end("train", outputs)
+            self.training_step_outputs.clear()
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         # print("in validation", self.trainer.current_epoch)
-        if self.trainer.current_epoch % 50 == 0  or  (self.trainer.current_epoch+1) % 50 == 0:       
-            self.save_npy(outputs[0][0], outputs[0][1], phase='val', epoch=self.trainer.current_epoch)
-        return self.allsplit_epoch_end("val", outputs)
+        if hasattr(self, 'validation_step_outputs') and len(self.validation_step_outputs) > 0:
+            outputs = self.validation_step_outputs
+            if self.trainer.current_epoch % 50 == 0  or  (self.trainer.current_epoch+1) % 50 == 0:       
+                self.save_npy(outputs[0][0], outputs[0][1], phase='val', epoch=self.trainer.current_epoch)
+            self.allsplit_epoch_end("val", outputs)
+            self.validation_step_outputs.clear()
 
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self):
         print("in test_epoch_end", self.trainer.current_epoch)
-        self.save_npy(outputs[0][0], outputs[0][1], phase='test', epoch=self.trainer.current_epoch)
-        self.cfg.TEST.REP_I = self.cfg.TEST.REP_I + 1
-
-        return self.allsplit_epoch_end("test", outputs)
+        if hasattr(self, 'test_step_outputs') and len(self.test_step_outputs) > 0:
+            outputs = self.test_step_outputs
+            self.save_npy(outputs[0][0], outputs[0][1], phase='test', epoch=self.trainer.current_epoch)
+            self.cfg.TEST.REP_I = self.cfg.TEST.REP_I + 1
+            self.allsplit_epoch_end("test", outputs)
+            self.test_step_outputs.clear()
     
     
     def training_step(self, batch, batch_idx):
         epoch = int(self.trainer.current_epoch)
         batch = self.get_input(batch, batch_idx)
         loss = self.allsplit_step("train", batch, batch_idx, epoch)
-        # self.training_step_outputs.append(loss)
+        # Detach tensors to prevent memory leak
+        loss_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in loss.items()}
+        self.training_step_outputs.append(loss_detached)
         return loss
 
     def validation_step(self, batch, batch_idx):
         epoch = int(self.trainer.current_epoch)
         # print("In validation_step! epoch is :", epoch)
         batch = self.get_input(batch, batch_idx)
-        return self.allsplit_step("val", batch, batch_idx, epoch)
+        outputs = self.allsplit_step("val", batch, batch_idx, epoch)
+        # Detach tensors to prevent memory leak
+        # outputs is a tuple: (samples, cond, loss_dict)
+        if isinstance(outputs, tuple):
+            samples, cond, loss_dict = outputs
+            loss_dict_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in loss_dict.items()}
+            outputs_detached = (samples, cond, loss_dict_detached)
+        else:
+            outputs_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in outputs.items()}
+        self.validation_step_outputs.append(outputs_detached)
+        return outputs
 
     def test_step(self, batch, batch_idx):
         epoch = int(self.trainer.current_epoch)
@@ -294,7 +318,17 @@ class Global_Module(BaseModel):
         batch = self.get_input(batch, batch_idx)
         if len(self.times) *self.cfg.TEST.BATCH_SIZE % (100) > 0 and len(self.times) > 0:
             print(f"Average time per sample ({self.cfg.TEST.BATCH_SIZE*len(self.times)}): ", np.mean(self.times)/self.cfg.TEST.BATCH_SIZE)
-        return self.allsplit_step("test", batch, batch_idx, epoch)
+        outputs = self.allsplit_step("test", batch, batch_idx, epoch)
+        # Detach tensors to prevent memory leak
+        # outputs is a tuple: (samples, cond, loss_dict)
+        if isinstance(outputs, tuple):
+            samples, cond, loss_dict = outputs
+            loss_dict_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in loss_dict.items()}
+            outputs_detached = (samples, cond, loss_dict_detached)
+        else:
+            outputs_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in outputs.items()}
+        self.test_step_outputs.append(outputs_detached)
+        return outputs
 
             
             

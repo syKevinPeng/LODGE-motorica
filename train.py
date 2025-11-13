@@ -136,7 +136,7 @@ def main():
         save_on_train_epoch_end=True,
     )
     callbacks = [
-        RichProgressBar(refresh_rate=10),
+        # RichProgressBar(refresh_rate=10),
         ProgressLogger(metric_monitor=metric_monitor),
         ckpt_cb,
     ]
@@ -168,7 +168,7 @@ def main():
         log_every_n_steps=cfg.LOGGER.LOG_EVERY_STEPS,
         deterministic=False,
         detect_anomaly=False,
-        enable_progress_bar=True,  # Enable Rich progress bar on rank 0
+        enable_progress_bar=False,  # Enable Rich progress bar on rank 0
         logger=loggers,
         callbacks=callbacks,
         check_val_every_n_epoch=cfg.LOGGER.VAL_EVERY_STEPS,

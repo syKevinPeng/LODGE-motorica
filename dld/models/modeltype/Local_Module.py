@@ -441,8 +441,10 @@ class Local_Module(BaseModel):
                 log_dict["discriminator_loss/train_step"] = loss_d.item() if isinstance(loss_d, torch.Tensor) else loss_d
                 self.log_dict(log_dict, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
             
-            # Store outputs for epoch end
-            self.training_step_outputs.append([loss_g, loss_d])
+            # Store outputs for epoch end - detach tensors to prevent memory leak
+            loss_g_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in loss_g.items()}
+            loss_d_detached = loss_d.detach() if isinstance(loss_d, torch.Tensor) else loss_d
+            self.training_step_outputs.append([loss_g_detached, loss_d_detached])
             return loss_g
         else:
             loss = self.allsplit_step("train", batch, batch_idx, epoch)
@@ -457,7 +459,9 @@ class Local_Module(BaseModel):
                         log_dict[f"{key}/train_step"] = value
                 self.log_dict(log_dict, on_step=True, on_epoch=False, prog_bar=True, logger=True, sync_dist=True)
             
-            self.training_step_outputs.append(loss)
+            # Detach tensors to prevent memory leak
+            loss_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in loss.items()}
+            self.training_step_outputs.append(loss_detached)
             return loss
     
     def optimizer_step(self, *args, **kwargs):
@@ -478,7 +482,15 @@ class Local_Module(BaseModel):
         # print("In validation_step! epoch is :", epoch)
         batch = self.get_input(batch, batch_idx)
         outputs = self.allsplit_step("val", batch, batch_idx, epoch)
-        self.validation_step_outputs.append(outputs)
+        # Detach tensors to prevent memory leak
+        # outputs is a tuple: (samples, cond, loss_dict)
+        if isinstance(outputs, tuple):
+            samples, cond, loss_dict = outputs
+            loss_dict_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in loss_dict.items()}
+            outputs_detached = (samples, cond, loss_dict_detached)
+        else:
+            outputs_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in outputs.items()}
+        self.validation_step_outputs.append(outputs_detached)
         return outputs
 
     def test_step(self, batch, batch_idx):
@@ -488,7 +500,15 @@ class Local_Module(BaseModel):
         if len(self.times) *self.cfg.TEST.BATCH_SIZE % (100) > 0 and len(self.times) > 0:
             print(f"Average time per sample ({self.cfg.TEST.BATCH_SIZE*len(self.times)}): ", np.mean(self.times)/self.cfg.TEST.BATCH_SIZE)
         outputs = self.allsplit_step("test", batch, batch_idx, epoch)
-        self.test_step_outputs.append(outputs)
+        # Detach tensors to prevent memory leak
+        # outputs is a tuple: (samples, cond, loss_dict)
+        if isinstance(outputs, tuple):
+            samples, cond, loss_dict = outputs
+            loss_dict_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in loss_dict.items()}
+            outputs_detached = (samples, cond, loss_dict_detached)
+        else:
+            outputs_detached = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in outputs.items()}
+        self.test_step_outputs.append(outputs_detached)
         return outputs
 
             

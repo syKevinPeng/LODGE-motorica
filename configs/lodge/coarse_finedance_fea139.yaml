@@ -1,6 +1,6 @@
-NAME: FineDance_Coarse_relative_noNorm_128len_139_diff_bc800 # Experiment name
+NAME: Motorica_Coarse_relative_noNorm_128len_139_diff_bc800 # Experiment name
 ACCELERATOR: 'gpu' # Devices optioncal: “cpu”, “gpu”, “tpu”, “ipu”, “hpu”, “mps, “auto”
-DEVICE: [0,1] 
+DEVICE: [0, 1] 
 
 # FOLDER: ./experiments
 SEED_VALUE: 1234
@@ -17,8 +17,8 @@ TRAIN:
   END_EPOCH: 3001 # End epoch
   RESUME: '' # Experiment path to be resumed training
   PRETRAINED_VAE: ''
-  PRETRAINED: '/data2/lrh/project/dance/Lodge/lodge302/experiments/Local_Module/FineDance_relative_Norm_GenreDis_bc190/checkpoints/epoch=1399.ckpt' # Attention! Set your Pretrained model path
-  DATASETS: ['FINEDANCE_139CUT'] # Training datasets
+  PRETRAINED: '/fs/nexus-projects/PhysicsFall/LODGE/experiments/Local_Module/debug--motorica_relative_Norm_GenreDis_bc190/checkpoints/epoch=299.ckpt' # Attention! Set your Pretrained model path
+  DATASETS: ['motorica'] # Training datasets
 
   # OPTIM:
   #   TYPE: 'AdamW' # Optimizer type
@@ -57,7 +57,7 @@ TEST:
   MM_NUM_TIMES: 10 # Number of times to repeat the multimodal test
   DIVERSITY_TIMES: 300 # Number of times to repeat the diversity test
   REP_I: 0
-  DATASETS: ['FINEDANCE_139CUT']
+  DATASETS: ['motorica']
 
 model:
   target: 'modules'
@@ -119,8 +119,8 @@ LOGGER:
   VAL_EVERY_STEPS: 50
   TENSORBOARD: true
   WANDB:
-    OFFLINE: false
-    PROJECT: null
+    MODE: online
+    PROJECT: lodge
     RESUME_ID: null
 RENDER:
   JOINT_TYPE: mmm
@@ -147,11 +147,11 @@ DEMO:
 
 FINEDANCE:
   mix: False           
-  full_seq_len: 1024   # 150
+  full_seq_len: 150   # 150
   length_fi: 128
-  windows: 10  # 16   #40   #
+  windows: 150  # 16   #40   #
   is_mirror: False    
-  nfeats: 139
+  nfeats: 151
   njoints: 22   
   mode: single  # "single" , "double_react", "double"
   partial: full   # "full" , "morden", "tradition"

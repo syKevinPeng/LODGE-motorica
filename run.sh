@@ -3,7 +3,7 @@
 #SBATCH -p tron
 #SBATCH --qos=high  
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:rtxa5000:4
+#SBATCH --gres=gpu:rtxa6000:2
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --time=1-00:00:00
